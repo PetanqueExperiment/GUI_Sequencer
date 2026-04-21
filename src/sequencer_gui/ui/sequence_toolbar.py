@@ -15,7 +15,12 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
-from sequencer_gui.sequence_io import SequenceFileError, load_sequence, save_sequence
+from sequencer_gui.sequence_io import (
+    SequenceFileError,
+    load_sequence,
+    save_sequence,
+    validate_document_for_ui,
+)
 
 
 class SequenceToolbar(QGroupBox):
@@ -69,7 +74,7 @@ class SequenceToolbar(QGroupBox):
         if not path_str:
             return
         try:
-            save_sequence(path_str, name, self._state.model)
+            save_sequence(path_str, name, self._state.document)
         except OSError as e:
             QMessageBox.warning(self, "Save failed", str(e))
 
@@ -83,7 +88,7 @@ class SequenceToolbar(QGroupBox):
         if not path_str:
             return
         try:
-            name, model = load_sequence(path_str)
+            name, document = load_sequence(path_str)
         except SequenceFileError as e:
             QMessageBox.warning(self, "Load failed", str(e))
             return
@@ -91,14 +96,10 @@ class SequenceToolbar(QGroupBox):
             QMessageBox.warning(self, "Load failed", str(e))
             return
 
-        rows, cols = model.rows, model.cols
-        if rows != 4 or cols != 4:
-            QMessageBox.warning(
-                self,
-                "Load failed",
-                f"This build only supports 4×4 sequences (file is {rows}×{cols}).",
-            )
+        err = validate_document_for_ui(document)
+        if err is not None:
+            QMessageBox.warning(self, "Load failed", err)
             return
 
         self._state.set_sequence_name(name)
-        self._state.replace_model(model)
+        self._state.replace_document(document, active_tab=0)

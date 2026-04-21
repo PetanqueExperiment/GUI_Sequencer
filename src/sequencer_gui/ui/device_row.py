@@ -135,6 +135,15 @@ class DeviceRowWidget(QWidget):
 
         self._rebuild_analog_section()
 
+        self.set_timeline_read_only(state.timeline_read_only)
+
+    def set_timeline_read_only(self, read_only: bool) -> None:
+        for btn in self._buttons:
+            btn.setEnabled(not read_only)
+        for row in self._analog_spins:
+            for sp in row:
+                sp.setEnabled(not read_only)
+
     @property
     def logical_row(self) -> int:
         return self._row
@@ -198,6 +207,7 @@ class DeviceRowWidget(QWidget):
                 spins_row.append(sp)
                 self._analog_row_widgets.append(sp)
             self._analog_spins.append(spins_row)
+        self.set_timeline_read_only(self._state.timeline_read_only)
 
     def sync_from_model(self, model: SequenceModel) -> None:
         if self._row >= model.rows:
@@ -227,3 +237,4 @@ class DeviceRowWidget(QWidget):
             btn.blockSignals(True)
             btn.setChecked(model.channel(self._row, c))
             btn.blockSignals(False)
+        self.set_timeline_read_only(self._state.timeline_read_only)
