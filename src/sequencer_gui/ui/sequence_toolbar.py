@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
+from sequencer_gui.persistence import save_last_sequence_path
 from sequencer_gui.sequence_io import (
     SequenceFileError,
     load_sequence,
@@ -75,6 +76,7 @@ class SequenceToolbar(QGroupBox):
             return
         try:
             save_sequence(path_str, name, self._state.document)
+            save_last_sequence_path(str(Path(path_str).resolve()))
         except OSError as e:
             QMessageBox.warning(self, "Save failed", str(e))
 

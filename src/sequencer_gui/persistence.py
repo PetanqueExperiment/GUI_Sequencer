@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 _SETTINGS_ROW_LABELS = "row_labels"
 _SETTINGS_WINDOW_GEOMETRY_B64 = "window_geometry_b64"
+_SETTINGS_LAST_SEQUENCE_PATH = "last_sequence_path"
 
 
 def settings_path() -> Path:
@@ -60,4 +61,23 @@ def load_window_geometry() -> bytes | None:
 def save_window_geometry(geometry: bytes) -> None:
     data = _load_settings_dict()
     data[_SETTINGS_WINDOW_GEOMETRY_B64] = base64.b64encode(geometry).decode("ascii")
+    _save_settings_dict(data)
+
+
+def load_last_sequence_path() -> str | None:
+    """Absolute path to the last successfully saved sequence file, or None."""
+    data = _load_settings_dict()
+    p = data.get(_SETTINGS_LAST_SEQUENCE_PATH)
+    if isinstance(p, str) and p.strip():
+        return p
+    return None
+
+
+def save_last_sequence_path(path: str | None) -> None:
+    """Remember the path used for Save (canonical absolute path). Pass None to clear."""
+    data = _load_settings_dict()
+    if path and str(path).strip():
+        data[_SETTINGS_LAST_SEQUENCE_PATH] = str(Path(path).resolve())
+    else:
+        data.pop(_SETTINGS_LAST_SEQUENCE_PATH, None)
     _save_settings_dict(data)
