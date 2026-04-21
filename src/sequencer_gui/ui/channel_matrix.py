@@ -19,6 +19,17 @@ from sequencer_gui.ui.device_row import LABEL_COL_MIN_WIDTH_PX, DeviceRowWidget
 _PAIR_V_SPACING_PX = 4
 _TIME_AFTER_GAP_PX = 14
 _STEP_GROUP_GAP_PX = 10
+# Per timeline column: delay spin / channel / analog min width + grid horizontal spacing.
+_STEP_COL_MIN_PX = 72 + 4
+# Group box frame + layout margins (approx.) so horizontal scroll appears when needed.
+_MATRIX_MIN_WIDTH_EXTRA_PX = 48
+
+
+def min_width_for_timeline_cols(cols: int) -> int:
+    """Minimum width for the sequencer grid for a given number of step columns."""
+    if cols < 1:
+        cols = 1
+    return LABEL_COL_MIN_WIDTH_PX + cols * _STEP_COL_MIN_PX + _MATRIX_MIN_WIDTH_EXTRA_PX
 
 
 class ChannelMatrix(QGroupBox):
@@ -112,6 +123,8 @@ class ChannelMatrix(QGroupBox):
 
         self._outer.addStretch(1)
         self._apply_timeline_read_only()
+        self.setMinimumWidth(min_width_for_timeline_cols(model.cols))
+        self.updateGeometry()
 
     def _sync_from_model(self, model: SequenceModel) -> None:
         if model.rows != self._built_rows or model.cols != self._built_cols:

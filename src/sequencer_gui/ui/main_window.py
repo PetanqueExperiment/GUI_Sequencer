@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QCloseEvent
-from PyQt5.QtWidgets import QMainWindow, QTabBar, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFrame, QMainWindow, QScrollArea, QTabBar, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
 from sequencer_gui.persistence import save_row_labels
@@ -36,8 +36,15 @@ class MainWindow(QMainWindow):
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_bar, 0)
 
+        self._matrix_scroll = QScrollArea()
+        self._matrix_scroll.setFrameShape(QFrame.NoFrame)
+        self._matrix_scroll.setWidgetResizable(False)
+        self._matrix_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._matrix_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._matrix_scroll.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self._matrix = ChannelMatrix(state)
-        layout.addWidget(self._matrix, 1)
+        self._matrix_scroll.setWidget(self._matrix)
+        layout.addWidget(self._matrix_scroll, 1)
 
         state.document_changed.connect(self._sync_tab_titles)
         state.active_tab_changed.connect(self._sync_tab_selection)
@@ -72,6 +79,7 @@ class MainWindow(QMainWindow):
         self._tab_bar.blockSignals(False)
 
     def _on_tab_changed(self, index: int) -> None:
+        self._matrix_scroll.horizontalScrollBar().setValue(0)
         n = len(self._state.document.blocks)
         if index == n:
             self._state.set_active_tab(COMPLETE_TAB_INDEX)
