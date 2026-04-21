@@ -6,6 +6,7 @@ from sequencer_gui.software_objects.aom import AOM_ID, AomObject
 from sequencer_gui.software_objects.dds import DDS_ID, DdsObject
 from sequencer_gui.software_objects.protocol import SoftwareObject
 from sequencer_gui.software_objects.shutter import SHUTTER_ID, ShutterObject
+from sequencer_gui.software_objects.ttl import TTL_ID, TtlObject
 from sequencer_gui.software_objects.types import AnalogParameterSpec
 
 _OBJECTS: dict[str, SoftwareObject] = {}
@@ -41,6 +42,7 @@ def get_object(object_id: str) -> SoftwareObject:
 CATALOG_ORDER: tuple[str, ...] = (
     AOM_ID,
     SHUTTER_ID,
+    TTL_ID,
     DDS_ID,
 )
 
@@ -48,6 +50,7 @@ CATALOG_ORDER: tuple[str, ...] = (
 def _build_registry() -> None:
     register(AomObject())
     register(ShutterObject())
+    register(TtlObject())
     register(DdsObject())
 
 
