@@ -17,6 +17,7 @@ from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.software_objects.types import AnalogParameterSpec
 from sequencer_gui.ui.row_software_selector import LABEL_COL_MIN_WIDTH_PX, RowSoftwareSelector
+from sequencer_gui.ui.value_input import AnalogValueLineEdit, parse_analog_value
 
 _ROW_CHECKED_COLORS = (
     "#1f77b4",
@@ -99,7 +100,7 @@ class DeviceRowWidget(QWidget):
         self._row = row
         self._state = state
         self._buttons: list[QPushButton] = []
-        self._analog_edits: list[list[QLineEdit]] = []
+        self._analog_edits: list[list[AnalogValueLineEdit]] = []
         self._param_sig: tuple[str, ...] = ()
         self._analog_row_widgets: list[QWidget] = []
 
@@ -191,26 +192,32 @@ class DeviceRowWidget(QWidget):
         self._analog_row_widgets.clear()
         self._analog_edits = []
 
-    def _on_analog_editing_finished(self, line: QLineEdit, spec: AnalogParameterSpec, col: int) -> None:
+    def _on_analog_return_pressed(self, line: AnalogValueLineEdit, spec: AnalogParameterSpec, col: int) -> None:
         model = self._state.model
+        display_ok = model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals)
+
+        def revert() -> None:
+            line.set_committed_display(display_ok)
+
         s = line.text().strip()
         if s in ("-", "\u2212"):
             self._state.set_analog(self._row, spec.param_id, col, ANALOG_HOLD)
+            line.set_committed_display(self._state.model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
             return
         if not s:
-            line.blockSignals(True)
-            line.setText(model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
-            line.blockSignals(False)
+            revert()
             return
-        try:
-            x = float(s.replace(",", "."))
-        except ValueError:
-            line.blockSignals(True)
-            line.setText(model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
-            line.blockSignals(False)
+        parsed = parse_analog_value(s)
+        if parsed == "hold":
+            self._state.set_analog(self._row, spec.param_id, col, ANALOG_HOLD)
+            line.set_committed_display(self._state.model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
             return
-        x = _clamp(x, spec.minimum, spec.maximum)
+        if parsed is None:
+            revert()
+            return
+        x = _clamp(parsed, spec.minimum, spec.maximum)
         self._state.set_analog(self._row, spec.param_id, col, x)
+        line.set_committed_display(self._state.model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
 
     def _rebuild_analog_section(self) -> None:
         model = self._state.model
@@ -229,19 +236,19 @@ class DeviceRowWidget(QWidget):
             self._grid.addWidget(lab, g_row, 0)
             self._analog_row_widgets.append(lab)
 
-            edits_row: list[QLineEdit] = []
+            edits_row: list[AnalogValueLineEdit] = []
             for c in range(cols):
-                ed = QLineEdit()
+                ed = AnalogValueLineEdit(spec)
                 ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-                ed.setText(model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals))
+                ed.set_committed_display(model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals))
 
-                def make_finished(edt: QLineEdit, sp: AnalogParameterSpec, cc: int):
-                    def on_finished() -> None:
-                        self._on_analog_editing_finished(edt, sp, cc)
+                def make_return(edt: AnalogValueLineEdit, sp: AnalogParameterSpec, cc: int):
+                    def on_return() -> None:
+                        self._on_analog_return_pressed(edt, sp, cc)
 
-                    return on_finished
+                    return on_return
 
-                ed.editingFinished.connect(make_finished(ed, spec, c))
+                ed.set_on_return(make_return(ed, spec, c))
                 ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 self._grid.addWidget(ed, g_row, c + 1)
                 edits_row.append(ed)
@@ -269,9 +276,7 @@ class DeviceRowWidget(QWidget):
                 for c in range(min(model.cols, len(self._analog_edits[pi]))):
                     ed = self._analog_edits[pi][c]
                     txt = model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals)
-                    ed.blockSignals(True)
-                    ed.setText(txt)
-                    ed.blockSignals(False)
+                    ed.set_committed_display(txt)
         for c in range(min(model.cols, len(self._buttons))):
             btn = self._buttons[c]
             btn.blockSignals(True)

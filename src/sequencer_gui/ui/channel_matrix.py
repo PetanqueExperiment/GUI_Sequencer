@@ -94,7 +94,7 @@ class ChannelMatrix(QGroupBox):
             grid.setColumnStretch(col, 0)
         grid.setColumnStretch(0, 0)
 
-        corner = QLabel("Time")
+        corner = QLabel("Time (µs)")
         corner.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         corner.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
         corner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
