@@ -10,6 +10,7 @@ from sequencer_gui.domain.document import (
     document_from_single_model,
     merge_blocks,
 )
+from sequencer_gui.domain.analog_stored import AnalogStored
 from sequencer_gui.domain.model import SequenceModel
 
 # Tab index -1 is the read-only "Complete" view (all blocks concatenated).
@@ -146,7 +147,7 @@ class SequenceAppState(QObject):
         self._commit_document(self._document.with_block(bi, new_b))
         self.delays_changed.emit()
 
-    def set_analog(self, row: int, param_id: str, col: int, value: float) -> None:
+    def set_analog(self, row: int, param_id: str, col: int, value: AnalogStored) -> None:
         if self._active_tab == COMPLETE_TAB_INDEX:
             return
         bi = self._active_tab

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
@@ -16,7 +17,7 @@ class SequenceBlock:
     cols: int
     channels: Dict[Tuple[int, int], bool] = field(default_factory=dict)
     delays_us: Dict[int, float] = field(default_factory=dict)
-    analog: Dict[Tuple[int, str, int], float] = field(default_factory=dict)
+    analog: Dict[Tuple[int, str, int], AnalogStored] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.cols < 1:
@@ -70,11 +71,11 @@ class SequenceBlock:
             analog=dict(self.analog),
         )
 
-    def with_analog(self, rows: int, row: int, param_id: str, col: int, value: float) -> SequenceBlock:
+    def with_analog(self, rows: int, row: int, param_id: str, col: int, value: AnalogStored) -> SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = value
+        a[(row, param_id, col)] = ANALOG_HOLD if is_hold(value) else float(value)
         return SequenceBlock(
             name=self.name,
             enabled=self.enabled,
@@ -234,7 +235,7 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
     total_cols = sum(b.cols for b in use)
     channels: Dict[Tuple[int, int], bool] = {}
     delays_us: Dict[int, float] = {}
-    analog: Dict[Tuple[int, str, int], float] = {}
+    analog: Dict[Tuple[int, str, int], AnalogStored] = {}
     col_off = 0
     for b in use:
         for c in range(b.cols):

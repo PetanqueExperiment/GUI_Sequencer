@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 
@@ -14,7 +15,7 @@ class SequenceModel:
     cols: int = 8
     channels: Dict[Tuple[int, int], bool] = field(default_factory=dict)
     delays_us: Dict[int, float] = field(default_factory=dict)
-    analog: Dict[Tuple[int, str, int], float] = field(default_factory=dict)
+    analog: Dict[Tuple[int, str, int], AnalogStored] = field(default_factory=dict)
     row_labels: Tuple[str, ...] = field(default_factory=tuple)
     row_software: Tuple[str, ...] = field(default_factory=tuple)
 
@@ -43,15 +44,36 @@ class SequenceModel:
     def channel(self, row: int, col: int) -> bool:
         return self.channels.get((row, col), True)
 
-    def analog_value(self, row: int, param_id: str, col: int) -> float:
-        key = (row, param_id, col)
-        if key in self.analog:
-            return self.analog[key]
+    def _default_analog_for_param(self, row: int, param_id: str) -> float:
         obj = get_object(self.row_software_name(row))
         for p in obj.analog_parameters:
             if p.param_id == param_id:
-                return p.default
+                return float(p.default)
         return 0.0
+
+    def analog_value(self, row: int, param_id: str, col: int) -> float:
+        """Resolved numeric value (hold → previous step or parameter default)."""
+        key = (row, param_id, col)
+        if key in self.analog:
+            v = self.analog[key]
+            if is_hold(v):
+                if col <= 0:
+                    return self._default_analog_for_param(row, param_id)
+                return self.analog_value(row, param_id, col - 1)
+            return float(v)
+        obj = get_object(self.row_software_name(row))
+        for p in obj.analog_parameters:
+            if p.param_id == param_id:
+                return float(p.default)
+        return 0.0
+
+    def analog_display_text(self, row: int, param_id: str, col: int, *, decimals: int) -> str:
+        """Text shown in the cell: '-' for hold, else formatted resolved number."""
+        key = (row, param_id, col)
+        if key in self.analog and is_hold(self.analog[key]):
+            return "-"
+        v = self.analog_value(row, param_id, col)
+        return format(v, f".{decimals}f")
 
     def with_channel(self, row: int, col: int, on: bool) -> SequenceModel:
         if not (0 <= row < self.rows and 0 <= col < self.cols):
@@ -105,11 +127,11 @@ class SequenceModel:
             row_software=self.row_software,
         )
 
-    def with_analog(self, row: int, param_id: str, col: int, value: float) -> SequenceModel:
+    def with_analog(self, row: int, param_id: str, col: int, value: AnalogStored) -> SequenceModel:
         if not (0 <= row < self.rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = value
+        a[(row, param_id, col)] = ANALOG_HOLD if is_hold(value) else float(value)
         return SequenceModel(
             rows=self.rows,
             cols=self.cols,

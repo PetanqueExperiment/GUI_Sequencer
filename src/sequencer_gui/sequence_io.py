@@ -8,6 +8,7 @@ This module implements JSON with a small header (`format`, `version`, `name`).
 Version 1: `analog` was a dense rows×cols matrix (one value per row/step).
 Version 2: `analog_entries` lists `{row, param_id, col, value}` for per-parameter analog.
 Version 3: multi-block `document` with shared rows and per-block timelines.
+Version 4: `analog_entries` `value` may be the string `"hold"` (same resolved value as the previous step).
 
 Migrating v1 → v2: for each row `r`, legacy values `analog[r][c]` are mapped to the
 **first** `param_id` of `get_object(row_software[r])` when that object has at least
@@ -24,15 +25,31 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument, document_from_single_model
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 FORMAT_ID = "sequencer_gui_sequence"
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 
 # Fixed hardware rows for this build (matches toolbar validation).
 _REQUIRED_ROWS = 4
+
+
+def _analog_to_json_value(v: AnalogStored) -> float | str:
+    return "hold" if is_hold(v) else float(v)
+
+
+def _analog_from_json_value(raw: Any, *, allow_hold: bool) -> AnalogStored:
+    if raw == "hold":
+        if not allow_hold:
+            raise SequenceFileError('analog_entries "hold" requires file format version 4+')
+        return ANALOG_HOLD
+    try:
+        return float(raw)
+    except (TypeError, ValueError) as e:
+        raise SequenceFileError("Invalid analog_entries value") from e
 
 
 class SequenceFileError(ValueError):
@@ -43,7 +60,7 @@ def model_to_payload(model: SequenceModel) -> dict[str, Any]:
     analog_entries: list[dict[str, Any]] = []
     for (r, param_id, c), v in model.analog.items():
         analog_entries.append(
-            {"row": r, "param_id": param_id, "col": c, "value": float(v)}
+            {"row": r, "param_id": param_id, "col": c, "value": _analog_to_json_value(v)}
         )
     return {
         "rows": model.rows,
@@ -62,7 +79,7 @@ def _block_payload(block: SequenceBlock, rows: int) -> dict[str, Any]:
     analog_entries: list[dict[str, Any]] = []
     for (r, param_id, c), v in block.analog.items():
         analog_entries.append(
-            {"row": r, "param_id": param_id, "col": c, "value": float(v)}
+            {"row": r, "param_id": param_id, "col": c, "value": _analog_to_json_value(v)}
         )
     return {
         "name": block.name,
@@ -90,8 +107,8 @@ def _migrate_v1_analog(
     cols: int,
     an_rows: list[list[Any]],
     row_software: tuple[str, ...],
-) -> dict[tuple[int, str, int], float]:
-    analog: dict[tuple[int, str, int], float] = {}
+) -> dict[tuple[int, str, int], AnalogStored]:
+    analog: dict[tuple[int, str, int], AnalogStored] = {}
     for r in range(rows):
         obj = get_object(row_software[r])
         params = obj.analog_parameters
@@ -134,7 +151,8 @@ def model_from_payload(data: dict[str, Any], *, format_version: int) -> Sequence
         row_software = tuple(DEFAULT_ON_OBJECT for _ in range(rows))
 
     if format_version >= 2:
-        analog: dict[tuple[int, str, int], float] = {}
+        allow_hold = format_version >= 4
+        analog: dict[tuple[int, str, int], AnalogStored] = {}
         raw_entries = data.get("analog_entries")
         if raw_entries is not None:
             if not isinstance(raw_entries, list):
@@ -144,7 +162,9 @@ def model_from_payload(data: dict[str, Any], *, format_version: int) -> Sequence
                     r = int(item["row"])
                     pid = str(item["param_id"])
                     c = int(item["col"])
-                    v = float(item["value"])
+                    v = _analog_from_json_value(item["value"], allow_hold=allow_hold)
+                except SequenceFileError:
+                    raise
                 except (KeyError, TypeError, ValueError) as e:
                     raise SequenceFileError("Invalid analog_entries item") from e
                 if not (0 <= r < rows and 0 <= c < cols):
@@ -169,7 +189,7 @@ def model_from_payload(data: dict[str, Any], *, format_version: int) -> Sequence
     )
 
 
-def _block_from_payload(data: dict[str, Any], rows: int) -> SequenceBlock:
+def _block_from_payload(data: dict[str, Any], rows: int, *, format_version: int) -> SequenceBlock:
     try:
         name = str(data["name"])
         enabled = bool(data.get("enabled", True))
@@ -193,7 +213,8 @@ def _block_from_payload(data: dict[str, Any], rows: int) -> SequenceBlock:
 
     delays_us = {c: float(delays[c]) for c in range(cols)}
 
-    analog: dict[tuple[int, str, int], float] = {}
+    allow_hold = format_version >= 4
+    analog: dict[tuple[int, str, int], AnalogStored] = {}
     raw_entries = data.get("analog_entries")
     if raw_entries is not None:
         if not isinstance(raw_entries, list):
@@ -203,7 +224,9 @@ def _block_from_payload(data: dict[str, Any], rows: int) -> SequenceBlock:
                 r = int(item["row"])
                 pid = str(item["param_id"])
                 c = int(item["col"])
-                v = float(item["value"])
+                v = _analog_from_json_value(item["value"], allow_hold=allow_hold)
+            except SequenceFileError:
+                raise
             except (KeyError, TypeError, ValueError) as e:
                 raise SequenceFileError("Invalid analog_entries item") from e
             if not (0 <= r < rows and 0 <= c < cols):
@@ -220,7 +243,7 @@ def _block_from_payload(data: dict[str, Any], rows: int) -> SequenceBlock:
     )
 
 
-def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
+def document_from_payload(data: dict[str, Any], *, format_version: int) -> SequenceDocument:
     try:
         rows = int(data["rows"])
         labels = tuple(str(x) for x in data["row_labels"])
@@ -239,7 +262,7 @@ def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
     else:
         row_software = tuple(DEFAULT_ON_OBJECT for _ in range(rows))
 
-    blocks = tuple(_block_from_payload(b, rows) for b in raw_blocks)
+    blocks = tuple(_block_from_payload(b, rows, format_version=format_version) for b in raw_blocks)
     return SequenceDocument(rows=rows, row_labels=labels, row_software=row_software, blocks=blocks)
 
 
@@ -278,8 +301,8 @@ def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:
 
     raw_document = doc.get("document")
     if not isinstance(raw_document, dict):
-        raise SequenceFileError("Missing document payload (v3).")
-    document = document_from_payload(raw_document)
+        raise SequenceFileError("Missing document payload (v3+).")
+    document = document_from_payload(raw_document, format_version=ver)
     return name, document
 
 

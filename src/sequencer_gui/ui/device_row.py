@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractSpinBox,
-    QDoubleSpinBox,
     QGridLayout,
     QLabel,
     QLineEdit,
@@ -14,8 +12,10 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object
+from sequencer_gui.software_objects.types import AnalogParameterSpec
 from sequencer_gui.ui.row_software_selector import LABEL_COL_MIN_WIDTH_PX, RowSoftwareSelector
 
 _ROW_CHECKED_COLORS = (
@@ -31,7 +31,7 @@ _ROW_CHECKED_COLORS = (
     "#17becf",
 )
 
-# One timeline step: delay spin, channel toggle, analog spin (same width every row).
+# One timeline step: delay spin, channel toggle, analog line edit (same width every row).
 STEP_COLUMN_WIDTH_PX = 72
 # Must match QGridLayout.setHorizontalSpacing on the row grid.
 _GRID_H_SPACING_PX = 4
@@ -87,6 +87,10 @@ def _channel_button_stylesheet(row_index: int) -> str:
 _HEADER_COL_SPACING_PX = 4
 
 
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
 class DeviceRowWidget(QWidget):
     """One sequencer row: label + software combo, tall channel toggles, 0..N analog parameter rows."""
 
@@ -95,7 +99,7 @@ class DeviceRowWidget(QWidget):
         self._row = row
         self._state = state
         self._buttons: list[QPushButton] = []
-        self._analog_spins: list[list[QDoubleSpinBox]] = []
+        self._analog_edits: list[list[QLineEdit]] = []
         self._param_sig: tuple[str, ...] = ()
         self._analog_row_widgets: list[QWidget] = []
 
@@ -159,9 +163,9 @@ class DeviceRowWidget(QWidget):
     def set_timeline_read_only(self, read_only: bool) -> None:
         for btn in self._buttons:
             btn.setEnabled(not read_only)
-        for row in self._analog_spins:
-            for sp in row:
-                sp.setEnabled(not read_only)
+        for row in self._analog_edits:
+            for ed in row:
+                ed.setEnabled(not read_only)
 
     @property
     def logical_row(self) -> int:
@@ -185,7 +189,28 @@ class DeviceRowWidget(QWidget):
             self._grid.removeWidget(w)
             w.deleteLater()
         self._analog_row_widgets.clear()
-        self._analog_spins = []
+        self._analog_edits = []
+
+    def _on_analog_editing_finished(self, line: QLineEdit, spec: AnalogParameterSpec, col: int) -> None:
+        model = self._state.model
+        s = line.text().strip()
+        if s in ("-", "\u2212"):
+            self._state.set_analog(self._row, spec.param_id, col, ANALOG_HOLD)
+            return
+        if not s:
+            line.blockSignals(True)
+            line.setText(model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
+            line.blockSignals(False)
+            return
+        try:
+            x = float(s.replace(",", "."))
+        except ValueError:
+            line.blockSignals(True)
+            line.setText(model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
+            line.blockSignals(False)
+            return
+        x = _clamp(x, spec.minimum, spec.maximum)
+        self._state.set_analog(self._row, spec.param_id, col, x)
 
     def _rebuild_analog_section(self) -> None:
         model = self._state.model
@@ -204,29 +229,24 @@ class DeviceRowWidget(QWidget):
             self._grid.addWidget(lab, g_row, 0)
             self._analog_row_widgets.append(lab)
 
-            spins_row: list[QDoubleSpinBox] = []
+            edits_row: list[QLineEdit] = []
             for c in range(cols):
-                sp = QDoubleSpinBox()
-                sp.setButtonSymbols(QAbstractSpinBox.NoButtons)
-                sp.setRange(spec.minimum, spec.maximum)
-                sp.setDecimals(spec.decimals)
-                sp.setSingleStep(spec.single_step)
-                sp.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-                sp.setValue(model.analog_value(self._row, spec.param_id, c))
-                pid = spec.param_id
+                ed = QLineEdit()
+                ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+                ed.setText(model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals))
 
-                def make_a(rr: int, param_id: str, cc: int):
-                    def on_value(v: float) -> None:
-                        self._state.set_analog(rr, param_id, cc, v)
+                def make_finished(edt: QLineEdit, sp: AnalogParameterSpec, cc: int):
+                    def on_finished() -> None:
+                        self._on_analog_editing_finished(edt, sp, cc)
 
-                    return on_value
+                    return on_finished
 
-                sp.valueChanged.connect(make_a(self._row, pid, c))
-                sp.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-                self._grid.addWidget(sp, g_row, c + 1)
-                spins_row.append(sp)
-                self._analog_row_widgets.append(sp)
-            self._analog_spins.append(spins_row)
+                ed.editingFinished.connect(make_finished(ed, spec, c))
+                ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                self._grid.addWidget(ed, g_row, c + 1)
+                edits_row.append(ed)
+                self._analog_row_widgets.append(ed)
+            self._analog_edits.append(edits_row)
         self.set_timeline_read_only(self._state.timeline_read_only)
 
     def sync_from_model(self, model: SequenceModel) -> None:
@@ -244,14 +264,14 @@ class DeviceRowWidget(QWidget):
         else:
             obj = get_object(model.row_software_name(self._row))
             for pi, spec in enumerate(obj.analog_parameters):
-                if pi >= len(self._analog_spins):
+                if pi >= len(self._analog_edits):
                     break
-                for c in range(min(model.cols, len(self._analog_spins[pi]))):
-                    sp = self._analog_spins[pi][c]
-                    v = model.analog_value(self._row, spec.param_id, c)
-                    sp.blockSignals(True)
-                    sp.setValue(v)
-                    sp.blockSignals(False)
+                for c in range(min(model.cols, len(self._analog_edits[pi]))):
+                    ed = self._analog_edits[pi][c]
+                    txt = model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals)
+                    ed.blockSignals(True)
+                    ed.setText(txt)
+                    ed.blockSignals(False)
         for c in range(min(model.cols, len(self._buttons))):
             btn = self._buttons[c]
             btn.blockSignals(True)
