@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: sequencer-gui
+Version: 0.1.0
+Summary: ArtiQ experimental sequencer GUI (UI only)
+Requires-Python: >=3.10
+Requires-Dist: PyQt5>=5.15
+Provides-Extra: dev

@@ -1,0 +1,2 @@
+[console_scripts]
+sequencer-gui = sequencer_gui.main:main

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sequencer-gui"
+version = "0.1.0"
+description = "ArtiQ experimental sequencer GUI (UI only)"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt5>=5.15",
+]
+
+# Run the app: `python -m sequencer_gui` (underscore; `python -m sequencer-gui` cannot work—hyphens are invalid in module names).
+# Or after install: `sequencer-gui` (console script, hyphen OK).
+[project.scripts]
+sequencer-gui = "sequencer_gui.main:main"
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
