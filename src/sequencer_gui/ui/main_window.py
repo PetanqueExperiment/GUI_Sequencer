@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QCloseEvent
+from PyQt5.QtCore import QByteArray, Qt
+from PyQt5.QtGui import QCloseEvent, QGuiApplication, QShowEvent
 from PyQt5.QtWidgets import QFrame, QMainWindow, QScrollArea, QTabBar, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
-from sequencer_gui.persistence import save_row_labels
+from sequencer_gui.persistence import load_window_geometry, save_row_labels, save_window_geometry
 from sequencer_gui.ui.block_strip import BlockStripWidget
 from sequencer_gui.ui.channel_matrix import ChannelMatrix
 from sequencer_gui.ui.sequence_toolbar import SequenceToolbar
@@ -17,6 +17,7 @@ class MainWindow(QMainWindow):
         self._state = state
         self._update_window_title(state.sequence_name)
         state.sequence_name_changed.connect(self._update_window_title)
+        self._geometry_restore_done = False
         self.resize(560, 820)
 
         central = QWidget()
@@ -50,6 +51,45 @@ class MainWindow(QMainWindow):
         state.active_tab_changed.connect(self._sync_tab_selection)
 
         self._sync_tab_titles()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._geometry_restore_done:
+            return
+        self._geometry_restore_done = True
+        raw = load_window_geometry()
+        if raw and self.restoreGeometry(QByteArray(raw)):
+            self._ensure_on_screen()
+
+    def _ensure_on_screen(self) -> None:
+        frame = self.frameGeometry()
+        screen = QGuiApplication.screenAt(frame.center())
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        if avail.contains(frame):
+            return
+        x = frame.x()
+        y = frame.y()
+        w = frame.width()
+        h = frame.height()
+        if x + w > avail.right():
+            x = avail.right() - w
+        if y + h > avail.bottom():
+            y = avail.bottom() - h
+        if x < avail.left():
+            x = avail.left()
+        if y < avail.top():
+            y = avail.top()
+        self.move(x, y)
+        frame = self.frameGeometry()
+        if frame.width() > avail.width():
+            self.resize(avail.width() - 8, frame.height())
+        frame = self.frameGeometry()
+        if frame.height() > avail.height():
+            self.resize(self.width(), avail.height() - 8)
 
     def _sync_tab_titles(self) -> None:
         self._tab_bar.blockSignals(True)
@@ -92,4 +132,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._matrix.commit_row_labels_to_model()
         save_row_labels(self._state.document.row_labels)
+        save_window_geometry(bytes(self.saveGeometry()))
         super().closeEvent(event)
