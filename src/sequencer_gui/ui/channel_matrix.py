@@ -14,22 +14,26 @@ from PyQt5.QtWidgets import (
 
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.model import SequenceModel
-from sequencer_gui.ui.device_row import LABEL_COL_MIN_WIDTH_PX, DeviceRowWidget
+from sequencer_gui.ui.device_row import (
+    LABEL_COL_MIN_WIDTH_PX,
+    STEP_COLUMN_WIDTH_PX,
+    DeviceRowWidget,
+    timeline_content_width_px,
+)
 
 _PAIR_V_SPACING_PX = 4
 _TIME_AFTER_GAP_PX = 14
 _STEP_GROUP_GAP_PX = 10
-# Per timeline column: delay spin / channel / analog min width + grid horizontal spacing.
-_STEP_COL_MIN_PX = 72 + 4
+# Per timeline column: fixed step width + grid horizontal spacing (matches device_row).
+_STEP_COL_MIN_PX = STEP_COLUMN_WIDTH_PX + 4
+_GRID_H_SPACING_PX = 4
 # Group box frame + layout margins (approx.) so horizontal scroll appears when needed.
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
 
 
 def min_width_for_timeline_cols(cols: int) -> int:
-    """Minimum width for the sequencer grid for a given number of step columns."""
-    if cols < 1:
-        cols = 1
-    return LABEL_COL_MIN_WIDTH_PX + cols * _STEP_COL_MIN_PX + _MATRIX_MIN_WIDTH_EXTRA_PX
+    """Outer width of the Sequencer group box (timeline + margins) for horizontal scroll."""
+    return timeline_content_width_px(cols) + _MATRIX_MIN_WIDTH_EXTRA_PX
 
 
 class ChannelMatrix(QGroupBox):
@@ -81,13 +85,19 @@ class ChannelMatrix(QGroupBox):
 
         time_row = QWidget()
         grid = QGridLayout(time_row)
-        grid.setHorizontalSpacing(4)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
         grid.setVerticalSpacing(_PAIR_V_SPACING_PX)
         grid.setColumnMinimumWidth(0, LABEL_COL_MIN_WIDTH_PX)
+        for col in range(1, model.cols + 1):
+            grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
+            grid.setColumnStretch(col, 0)
+        grid.setColumnStretch(0, 0)
 
         corner = QLabel("Time")
         corner.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        corner.setMinimumWidth(28)
+        corner.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+        corner.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         grid.addWidget(corner, 0, 0)
 
         for c in range(model.cols):
@@ -96,25 +106,28 @@ class ChannelMatrix(QGroupBox):
             spin.setRange(0.0, 1e9)
             spin.setDecimals(3)
             spin.setSingleStep(1.0)
-            spin.setMinimumWidth(72)
+            spin.setFixedWidth(STEP_COLUMN_WIDTH_PX)
             spin.setValue(model.delay_us(c, 0.0))
             spin.valueChanged.connect(self._make_delay_handler(c))
             self._delay_spins.append(spin)
-            spin.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            spin.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             grid.addWidget(spin, 0, c + 1)
 
         time_gap = QWidget()
         time_gap.setFixedHeight(_TIME_AFTER_GAP_PX)
-        time_gap.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        time_gap.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         grid.addWidget(time_gap, 1, 0, 1, model.cols + 1)
 
-        corner.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self._outer.addWidget(time_row)
+        tw = timeline_content_width_px(model.cols)
+        time_row.setFixedWidth(tw)
+        time_row.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+        self._outer.addWidget(time_row, 0, Qt.AlignLeft)
 
         for r in range(model.rows):
             dr = DeviceRowWidget(r, state=self._state)
             self._device_rows.append(dr)
-            self._outer.addWidget(dr)
+            self._outer.addWidget(dr, 0, Qt.AlignLeft)
             if r < model.rows - 1:
                 gap = QWidget()
                 gap.setMinimumHeight(_STEP_GROUP_GAP_PX)
@@ -123,7 +136,8 @@ class ChannelMatrix(QGroupBox):
 
         self._outer.addStretch(1)
         self._apply_timeline_read_only()
-        self.setMinimumWidth(min_width_for_timeline_cols(model.cols))
+        self.setFixedWidth(min_width_for_timeline_cols(model.cols))
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.updateGeometry()
 
     def _sync_from_model(self, model: SequenceModel) -> None:

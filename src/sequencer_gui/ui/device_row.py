@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object
-from sequencer_gui.ui.row_software_selector import RowSoftwareSelector
+from sequencer_gui.ui.row_software_selector import LABEL_COL_MIN_WIDTH_PX, RowSoftwareSelector
 
 _ROW_CHECKED_COLORS = (
     "#1f77b4",
@@ -31,8 +31,17 @@ _ROW_CHECKED_COLORS = (
     "#17becf",
 )
 
-# Match RowSoftwareSelector maximum width; shared with ChannelMatrix Time row column 0.
-LABEL_COL_MIN_WIDTH_PX = 160
+# One timeline step: delay spin, channel toggle, analog spin (same width every row).
+STEP_COLUMN_WIDTH_PX = 72
+# Must match QGridLayout.setHorizontalSpacing on the row grid.
+_GRID_H_SPACING_PX = 4
+
+
+def timeline_content_width_px(cols: int) -> int:
+    """Exact width of the timeline grid (label column + steps + inter-column spacing)."""
+    if cols < 1:
+        cols = 1
+    return LABEL_COL_MIN_WIDTH_PX + cols * (STEP_COLUMN_WIDTH_PX + _GRID_H_SPACING_PX)
 
 
 def _channel_button_stylesheet(row_index: int) -> str:
@@ -93,11 +102,17 @@ class DeviceRowWidget(QWidget):
         m = state.model
         self._grid = QGridLayout(self)
         self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setHorizontalSpacing(4)
+        self._grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
         self._grid.setVerticalSpacing(4)
         self._grid.setColumnMinimumWidth(0, LABEL_COL_MIN_WIDTH_PX)
+        for col in range(1, m.cols + 1):
+            self._grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
+            self._grid.setColumnStretch(col, 0)
+        self._grid.setColumnStretch(0, 0)
 
         header = QWidget()
+        header.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+        header.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         hlay = QVBoxLayout(header)
         hlay.setContentsMargins(0, 0, 0, 0)
         hlay.setSpacing(_HEADER_COL_SPACING_PX)
@@ -110,6 +125,7 @@ class DeviceRowWidget(QWidget):
         hlay.addWidget(self._edit)
 
         self._sw = RowSoftwareSelector(row, state)
+        self._sw.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
         hlay.addWidget(self._sw)
 
         self._grid.addWidget(header, 0, 0, 2, 1)
@@ -118,8 +134,8 @@ class DeviceRowWidget(QWidget):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumWidth(40)
-            btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
+            btn.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
             btn.setStyleSheet(_channel_button_stylesheet(row))
             btn.setChecked(m.channel(row, c))
 
@@ -134,6 +150,9 @@ class DeviceRowWidget(QWidget):
             self._grid.addWidget(btn, 0, c + 1, 2, 1)
 
         self._rebuild_analog_section()
+
+        self.setFixedWidth(timeline_content_width_px(m.cols))
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
 
         self.set_timeline_read_only(state.timeline_read_only)
 
@@ -179,8 +198,9 @@ class DeviceRowWidget(QWidget):
             g_row = base_row + pi
             lab = QLabel(spec.label)
             lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            lab.setMinimumWidth(LABEL_COL_MIN_WIDTH_PX)
-            lab.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            lab.setWordWrap(False)
+            lab.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+            lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self._grid.addWidget(lab, g_row, 0)
             self._analog_row_widgets.append(lab)
 
@@ -191,7 +211,7 @@ class DeviceRowWidget(QWidget):
                 sp.setRange(spec.minimum, spec.maximum)
                 sp.setDecimals(spec.decimals)
                 sp.setSingleStep(spec.single_step)
-                sp.setMinimumWidth(72)
+                sp.setFixedWidth(STEP_COLUMN_WIDTH_PX)
                 sp.setValue(model.analog_value(self._row, spec.param_id, c))
                 pid = spec.param_id
 
@@ -202,7 +222,7 @@ class DeviceRowWidget(QWidget):
                     return on_value
 
                 sp.valueChanged.connect(make_a(self._row, pid, c))
-                sp.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+                sp.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 self._grid.addWidget(sp, g_row, c + 1)
                 spins_row.append(sp)
                 self._analog_row_widgets.append(sp)

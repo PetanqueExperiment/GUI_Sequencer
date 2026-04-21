@@ -6,6 +6,8 @@ from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object, iter_objects
 
+# Shared with ChannelMatrix column 0 and device_row header; fixed width aligns all rows.
+LABEL_COL_MIN_WIDTH_PX = 160
 
 _COMBO_H = 25
 
@@ -33,9 +35,8 @@ class RowSoftwareSelector(QWidget):
 
         layout.addWidget(self._combo)
 
-        self.setMinimumWidth(40)
-        self.setMaximumWidth(160)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.apply_from_model(state.model)
 
     def _on_index_changed(self, idx: int) -> None:
