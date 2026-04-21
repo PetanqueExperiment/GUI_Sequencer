@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QAbstractSpinBox,
-    QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
     QLabel,
@@ -20,15 +18,21 @@ from sequencer_gui.ui.device_row import (
     DeviceRowWidget,
     timeline_content_width_px,
 )
+from sequencer_gui.ui.value_input import CommitFloatLineEdit, parse_float_field
 
 _PAIR_V_SPACING_PX = 4
 _TIME_AFTER_GAP_PX = 14
 _STEP_GROUP_GAP_PX = 10
-# Per timeline column: fixed step width + grid horizontal spacing (matches device_row).
-_STEP_COL_MIN_PX = STEP_COLUMN_WIDTH_PX + 4
 _GRID_H_SPACING_PX = 4
-# Group box frame + layout margins (approx.) so horizontal scroll appears when needed.
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
+
+_DELAY_MIN_US = 0.0
+_DELAY_MAX_US = 1e9
+_DELAY_DECIMALS = 3
+
+
+def _format_delay_us(v: float) -> str:
+    return format(v, f".{_DELAY_DECIMALS}f")
 
 
 def min_width_for_timeline_cols(cols: int) -> int:
@@ -43,7 +47,7 @@ class ChannelMatrix(QGroupBox):
         super().__init__("Sequencer", parent)
         self._state = state
         self._device_rows: list[DeviceRowWidget] = []
-        self._delay_spins: list[QDoubleSpinBox] = []
+        self._delay_edits: list[CommitFloatLineEdit] = []
         self._built_rows = -1
         self._built_cols = -1
 
@@ -60,18 +64,31 @@ class ChannelMatrix(QGroupBox):
 
     def _apply_timeline_read_only(self) -> None:
         ro = self._state.timeline_read_only
-        for sp in self._delay_spins:
-            sp.setEnabled(not ro)
+        for ed in self._delay_edits:
+            ed.setEnabled(not ro)
 
-    def _make_delay_handler(self, col: int):
-        def on_value(value: float) -> None:
-            self._state.set_delay_us(col, value)
+    def _on_delay_return_pressed(self, col: int) -> None:
+        line = self._delay_edits[col]
+        model = self._state.model
 
-        return on_value
+        def revert() -> None:
+            line.set_committed_display(_format_delay_us(model.delay_us(col, 0.0)))
+
+        s = line.text().strip()
+        if not s:
+            revert()
+            return
+        parsed = parse_float_field(s)
+        if parsed is None:
+            revert()
+            return
+        x = max(_DELAY_MIN_US, min(_DELAY_MAX_US, parsed))
+        self._state.set_delay_us(col, x)
+        line.set_committed_display(_format_delay_us(self._state.model.delay_us(col, 0.0)))
 
     def _clear_content(self) -> None:
         self._device_rows.clear()
-        self._delay_spins.clear()
+        self._delay_edits.clear()
         while self._outer.count():
             item = self._outer.takeAt(0)
             w = item.widget()
@@ -101,17 +118,20 @@ class ChannelMatrix(QGroupBox):
         grid.addWidget(corner, 0, 0)
 
         for c in range(model.cols):
-            spin = QDoubleSpinBox()
-            spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
-            spin.setRange(0.0, 1e9)
-            spin.setDecimals(3)
-            spin.setSingleStep(1.0)
-            spin.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-            spin.setValue(model.delay_us(c, 0.0))
-            spin.valueChanged.connect(self._make_delay_handler(c))
-            self._delay_spins.append(spin)
-            spin.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            grid.addWidget(spin, 0, c + 1)
+            ed = CommitFloatLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
+            ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+            ed.set_committed_display(_format_delay_us(model.delay_us(c, 0.0)))
+
+            def make_return(cc: int):
+                def on_return() -> None:
+                    self._on_delay_return_pressed(cc)
+
+                return on_return
+
+            ed.set_on_return(make_return(c))
+            self._delay_edits.append(ed)
+            ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            grid.addWidget(ed, 0, c + 1)
 
         time_gap = QWidget()
         time_gap.setFixedHeight(_TIME_AFTER_GAP_PX)
@@ -144,13 +164,11 @@ class ChannelMatrix(QGroupBox):
         if model.rows != self._built_rows or model.cols != self._built_cols:
             self._build_content(model)
             return
-        for c, spin in enumerate(self._delay_spins):
+        for c, ed in enumerate(self._delay_edits):
             if c >= model.cols:
                 break
             v = model.delay_us(c, 0.0)
-            spin.blockSignals(True)
-            spin.setValue(v)
-            spin.blockSignals(False)
+            ed.set_committed_display(_format_delay_us(v))
         for dr in self._device_rows:
             dr.sync_from_model(model)
         self._apply_timeline_read_only()

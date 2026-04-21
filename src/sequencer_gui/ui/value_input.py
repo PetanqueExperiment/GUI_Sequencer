@@ -1,4 +1,4 @@
-"""Plain numeric parsing and digit-wise stepping for analog line edits (commit on Enter)."""
+"""Float line edits: commit on Enter, gray while editing, Up/Down local step."""
 
 from __future__ import annotations
 
@@ -79,16 +79,35 @@ def parse_analog_value(raw: str) -> Literal["hold"] | float | None:
         return None
 
 
-class AnalogValueLineEdit(QLineEdit):
+def parse_float_field(raw: str) -> float | None:
+    """Single float for delay/time; empty or invalid → None."""
+    s = raw.strip()
+    if not s:
+        return None
+    try:
+        return float(s.replace(",", "."))
+    except ValueError:
+        return None
+
+
+class CommitFloatLineEdit(QLineEdit):
     """
     Up/Down adjust the value locally without notifying the program.
-    The program is updated only when Return/Enter is pressed (returnPressed).
-    Gray while the text differs from last committed; black after a successful commit.
+    Commit when Return/Enter is pressed (returnPressed).
+    Gray while editing; black after commit. Focus out reverts uncommitted text.
     """
 
-    def __init__(self, spec: AnalogParameterSpec, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        minimum: float,
+        maximum: float,
+        decimals: int,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
-        self._spec = spec
+        self._minimum = minimum
+        self._maximum = maximum
+        self._decimals = decimals
         self._committed_text = ""
         self._style_guard = False
         self._on_return: Callable[[], None] | None = None
@@ -122,7 +141,6 @@ class AnalogValueLineEdit(QLineEdit):
             self._on_return()
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
-        # Discard edits not confirmed with Enter; restore last committed value.
         if self.text() != self._committed_text:
             self.set_committed_display(self._committed_text)
         else:
@@ -155,11 +173,10 @@ class AnalogValueLineEdit(QLineEdit):
         except ValueError:
             return False
         step = digit_step_left_of_cursor(num, rel)
-        lo, hi = self._spec.minimum, self._spec.maximum
-        nv = max(lo, min(hi, v + direction * step))
+        nv = max(self._minimum, min(self._maximum, v + direction * step))
         if nv == v:
             return True
-        dec = self._spec.decimals
+        dec = self._decimals
         txt = format(nv, f".{dec}f")
         pos_before = self.cursorPosition()
         self._style_guard = True
@@ -168,3 +185,10 @@ class AnalogValueLineEdit(QLineEdit):
         self.setCursorPosition(min(pos_before, len(txt)))
         self.setStyleSheet(_STYLE_EDITING)
         return True
+
+
+class AnalogValueLineEdit(CommitFloatLineEdit):
+    """Analog parameter cell: same as CommitFloatLineEdit with bounds from ``AnalogParameterSpec``."""
+
+    def __init__(self, spec: AnalogParameterSpec, parent: QWidget | None = None) -> None:
+        super().__init__(spec.minimum, spec.maximum, spec.decimals, parent)
