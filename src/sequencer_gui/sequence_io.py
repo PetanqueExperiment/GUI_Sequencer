@@ -266,15 +266,22 @@ def document_from_payload(data: dict[str, Any], *, format_version: int) -> Seque
     return SequenceDocument(rows=rows, row_labels=labels, row_software=row_software, blocks=blocks)
 
 
-def save_sequence(path: Path | str, name: str, document: SequenceDocument) -> None:
-    p = Path(path)
-    doc = {
+def live_sequence_file_dict(name: str, document: SequenceDocument) -> dict[str, Any]:
+    """Same top-level object as written by ``save_sequence`` (for in-memory sync, e.g. HERO)."""
+    return {
         "format": FORMAT_ID,
         "version": FORMAT_VERSION,
         "name": name,
         "document": document_to_payload(document),
     }
-    p.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def save_sequence(path: Path | str, name: str, document: SequenceDocument) -> None:
+    p = Path(path)
+    p.write_text(
+        json.dumps(live_sequence_file_dict(name, document), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:

@@ -61,6 +61,11 @@ class SequenceAppState(QObject):
             raise ValueError("document or model is required")
         self._active_tab = 0
         self._sequence_name = sequence_name
+        self._notify_backend()
+
+    def _notify_backend(self) -> None:
+        self._backend.sync_sequence_snapshot(self._document, self._sequence_name)
+        self._backend.apply(merge_blocks(self._document, enabled_only=True))
 
     @property
     def document(self) -> SequenceDocument:
@@ -89,6 +94,7 @@ class SequenceAppState(QObject):
     def set_sequence_name(self, name: str) -> None:
         self._sequence_name = name
         self.sequence_name_changed.emit(name)
+        self._notify_backend()
 
     def set_active_tab(self, index: int) -> None:
         if index == COMPLETE_TAB_INDEX:
@@ -99,7 +105,7 @@ class SequenceAppState(QObject):
             raise IndexError("active tab index out of range")
         self.active_tab_changed.emit(self._active_tab)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(self._document, enabled_only=True))
+        self._notify_backend()
 
     def replace_document(self, document: SequenceDocument, *, active_tab: int | None = None) -> None:
         self._document = document
@@ -111,7 +117,7 @@ class SequenceAppState(QObject):
         self.document_changed.emit(document)
         self.active_tab_changed.emit(self._active_tab)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(document, enabled_only=True))
+        self._notify_backend()
 
     def replace_model(self, model: SequenceModel) -> None:
         """Backward compatibility: load a flat model as a single block."""
@@ -121,7 +127,7 @@ class SequenceAppState(QObject):
         self._document = document
         self.document_changed.emit(document)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(document, enabled_only=True))
+        self._notify_backend()
 
     def set_channel(self, row: int, col: int, on: bool) -> None:
         if self._active_tab == COMPLETE_TAB_INDEX:
@@ -183,7 +189,7 @@ class SequenceAppState(QObject):
         self.document_changed.emit(new_doc)
         self.active_tab_changed.emit(self._active_tab)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(new_doc, enabled_only=True))
+        self._notify_backend()
 
     def apply_block_permutation(self, permutation: list[int]) -> None:
         """Reorder blocks in one step. permutation[i] is the original block index now at position i."""
@@ -202,7 +208,7 @@ class SequenceAppState(QObject):
         self.document_changed.emit(new_doc)
         self.active_tab_changed.emit(self._active_tab)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(new_doc, enabled_only=True))
+        self._notify_backend()
 
     def add_block(self) -> None:
         n = len(self._document.blocks) + 1
@@ -239,4 +245,4 @@ class SequenceAppState(QObject):
         self.document_changed.emit(new_doc)
         self.active_tab_changed.emit(self._active_tab)
         self.model_changed.emit(self.model)
-        self._backend.apply(merge_blocks(new_doc, enabled_only=True))
+        self._notify_backend()
