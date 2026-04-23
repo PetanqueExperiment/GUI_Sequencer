@@ -42,7 +42,7 @@ class SequenceModel:
         return self.row_software[row]
 
     def channel(self, row: int, col: int) -> bool:
-        return self.channels.get((row, col), True)
+        return self.channels.get((row, col), False)
 
     def _default_analog_for_param(self, row: int, param_id: str) -> float:
         obj = get_object(self.row_software_name(row))
@@ -157,5 +157,5 @@ class SequenceModel:
             row_software=self.row_software,
         )
 
-    def delay_us(self, col: int, default: float = 0.0) -> float:
+    def delay_us(self, col: int, default: float = 10.0) -> float:
         return self.delays_us.get(col, default)

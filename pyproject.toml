@@ -9,7 +9,12 @@ description = "ArtiQ experimental sequencer GUI (UI only)"
 requires-python = ">=3.10"
 dependencies = [
     "PyQt5>=5.15",
+    "numpy>=1.20",
 ]
+
+# HERO/ARTIQ: install the Petanque heros fork first so LocalHERO sees numpy in heros.heros globals:
+#   pip install -e "../Heros for Petanque"
+# (See requirements-artiq.txt.) PyPI heros alone is not sufficient for Sequencer_HERO + ARTIQ compile.
 
 # Run the app: `python -m sequencer_gui` (underscore; `python -m sequencer-gui` cannot work—hyphens are invalid in module names).
 # Or after install: `sequencer-gui` (console script, hyphen OK).

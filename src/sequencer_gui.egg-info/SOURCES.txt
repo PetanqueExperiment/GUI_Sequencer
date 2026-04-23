@@ -4,6 +4,7 @@ src/sequencer_gui/__main__.py
 src/sequencer_gui/main.py
 src/sequencer_gui/persistence.py
 src/sequencer_gui/sequence_io.py
+src/sequencer_gui/sequencer_hero.py
 src/sequencer_gui.egg-info/PKG-INFO
 src/sequencer_gui.egg-info/SOURCES.txt
 src/sequencer_gui.egg-info/dependency_links.txt
@@ -12,8 +13,11 @@ src/sequencer_gui.egg-info/requires.txt
 src/sequencer_gui.egg-info/top_level.txt
 src/sequencer_gui/app/__init__.py
 src/sequencer_gui/app/backend.py
+src/sequencer_gui/app/hero_dict_backend.py
 src/sequencer_gui/app/state.py
 src/sequencer_gui/domain/__init__.py
+src/sequencer_gui/domain/analog_stored.py
+src/sequencer_gui/domain/document.py
 src/sequencer_gui/domain/model.py
 src/sequencer_gui/software_objects/__init__.py
 src/sequencer_gui/software_objects/aom.py
@@ -21,10 +25,13 @@ src/sequencer_gui/software_objects/dds.py
 src/sequencer_gui/software_objects/protocol.py
 src/sequencer_gui/software_objects/registry.py
 src/sequencer_gui/software_objects/shutter.py
+src/sequencer_gui/software_objects/ttl.py
 src/sequencer_gui/software_objects/types.py
 src/sequencer_gui/ui/__init__.py
+src/sequencer_gui/ui/block_strip.py
 src/sequencer_gui/ui/channel_matrix.py
 src/sequencer_gui/ui/device_row.py
 src/sequencer_gui/ui/main_window.py
 src/sequencer_gui/ui/row_software_selector.py
 src/sequencer_gui/ui/sequence_toolbar.py
+src/sequencer_gui/ui/value_input.py

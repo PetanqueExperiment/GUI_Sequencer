@@ -17,11 +17,11 @@ class DdsObject:
         return (
             AnalogParameterSpec(
                 param_id="frequency",
-                label="Frequency (MHz)",
-                default=100.0,
+                label="Detuning (MHz)",
+                default=0.0,
                 minimum=0.0,
                 maximum=4000.0,
-                decimals=6,
+                decimals=1,
                 single_step=0.001,
             ),
         )

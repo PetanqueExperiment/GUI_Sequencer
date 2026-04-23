@@ -1,0 +1,72 @@
+artiq @ git+https://github.com/m-labs/artiq@a1bf0e1d5f60dc483893b16c5ba89666e7e35462
+artiq-comtools @ git+https://github.com/m-labs/artiq-comtools@3da1f80d702b3a01c4b4fba9e5bc832b79097338
+asttokens==3.0.1
+atomiq @ git+https://gitlab.com/atomiq-project/atomiq@9ba4984ed111776173da8788da1234c2ce6bbe47
+cbor2==5.8.0
+cffi==2.0.0
+colorama==0.4.6
+colorcet==3.1.0
+comm==0.2.3
+contourpy==1.3.3
+cycler==0.12.1
+debugpy==1.8.19
+decorator==5.2.1
+eclipse-zenoh==1.7.2
+executing==2.2.1
+fonttools==4.61.1
+h5py==3.15.1
+# Petanque heros fork (numpy in heros.heros, type_to_str => numpy.*). Repo root = parent of "GUI Sequencer".
+-e "../Heros for Petanque"
+herosmonitor @ file:///C:/Users/PETANQUE-PC/Desktop/Petanque%20Control%20Software/hero-monitor
+ipykernel==7.1.0
+ipython==9.9.0
+ipython_pygments_lexers==1.1.1
+jedi==0.19.2
+jupyter_client==8.8.0
+jupyter_core==5.9.1
+kiwisolver==1.4.9
+Levenshtein==0.27.3
+llvmlite==0.46.0
+lmdb==1.7.5
+markdown-it-py==4.0.0
+matplotlib==3.10.8
+matplotlib-inline==0.2.1
+mdurl==0.1.2
+nest-asyncio==1.6.0
+numpy==2.4.1
+packaging==25.0
+parso==0.8.5
+pillow==12.1.0
+platformdirs==4.5.1
+prettytable==3.17.0
+prompt_toolkit==3.0.52
+psutil==7.2.1
+pure_eval==0.2.3
+pycparser==2.23
+pygit2==1.19.1
+Pygments==2.19.2
+pyparsing==3.3.2
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.2
+PyQt5_sip==12.17.2
+pyqtgraph==0.14.0
+PySide6==6.10.1
+PySide6_Addons==6.10.1
+PySide6_Essentials==6.10.1
+python-dateutil==2.9.0.post0
+pythonparser==1.3
+pyzmq==27.1.0
+qasync==0.28.0
+qtconsole==5.7.0
+QtPy==2.4.3
+RapidFuzz==3.14.3
+regex==2025.11.3
+rich==14.2.0
+scipy==1.17.0
+shiboken6==6.10.1
+sipyco @ git+https://github.com/m-labs/sipyco@ce454bb64257b1bcef3703f258aaf7fa4ee0c275
+six==1.17.0
+stack-data==0.6.3
+tornado==6.5.4
+traitlets==5.14.3
+wcwidth==0.2.14
