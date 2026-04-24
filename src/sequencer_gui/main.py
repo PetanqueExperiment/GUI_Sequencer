@@ -26,13 +26,13 @@ def _load_initial_sequence() -> tuple[object, str]:
         p = Path(last)
         if p.is_file():
             try:
-                name, loaded = load_sequence(p)
+                _, loaded = load_sequence(p)
             except (OSError, SequenceFileError):
                 pass
             else:
                 if validate_document_for_ui(loaded) is None:
                     document = loaded
-                    sequence_name = name
+                    sequence_name = p.name
     return document, sequence_name
 
 

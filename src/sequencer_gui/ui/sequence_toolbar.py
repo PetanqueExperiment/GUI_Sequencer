@@ -90,7 +90,7 @@ class SequenceToolbar(QGroupBox):
         if not path_str:
             return
         try:
-            name, document = load_sequence(path_str)
+            _, document = load_sequence(path_str)
         except SequenceFileError as e:
             QMessageBox.warning(self, "Load failed", str(e))
             return
@@ -103,5 +103,5 @@ class SequenceToolbar(QGroupBox):
             QMessageBox.warning(self, "Load failed", err)
             return
 
-        self._state.set_sequence_name(name)
+        self._state.set_sequence_name(Path(path_str).name)
         self._state.replace_document(document, active_tab=0)

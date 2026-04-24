@@ -1,22 +1,10 @@
 """
-Save/load sequence definitions to disk.
+Save/load sequence definitions to disk (JSON, versioned).
 
-**Recommended: JSON** (`.json`) — human-readable, stdlib-only, versioned wrapper.
+Top-level: ``format`` / ``version`` (must match :data:`FORMAT_VERSION`) / ``name`` / ``document``.
 
-This module implements JSON with a small header (`format`, `version`, `name`).
-
-Version 1: `analog` was a dense rows×cols matrix (one value per row/step).
-Version 2: `analog_entries` lists `{row, param_id, col, value}` for per-parameter analog.
-Version 3: multi-block `document` with shared rows and per-block timelines.
-Version 4: `analog_entries` `value` may be the string `"hold"` (same resolved value as the previous step).
-
-Migrating v1 → v2: for each row `r`, legacy values `analog[r][c]` are mapped to the
-**first** `param_id` of `get_object(row_software[r])` when that object has at least
-one analog parameter; rows with zero analog parameters discard legacy values.
-Multi-parameter devices only receive the legacy column on the first parameter; others
-default until edited.
-
-Migrating v2 → v3: single-block document from the flat `model` payload.
+Each **block** uses ``device_rows``: ``"0"`` … (device row index) -> ``{ "states": [ bool, … ], "frequency": [ … ], "amplitude": [ … ], … }`` —
+``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, or ``null`` (default). Reserved key: ``states`` only.
 """
 
 from __future__ import annotations
@@ -26,12 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
-from sequencer_gui.domain.document import SequenceBlock, SequenceDocument, document_from_single_model
+from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 FORMAT_ID = "sequencer_gui_sequence"
-FORMAT_VERSION = 4
+FORMAT_VERSION = 8
 
 # Fixed hardware rows for this build (matches toolbar validation).
 _REQUIRED_ROWS = 4
@@ -41,55 +29,107 @@ def _analog_to_json_value(v: AnalogStored) -> float | str:
     return "hold" if is_hold(v) else float(v)
 
 
-def _analog_from_json_value(raw: Any, *, allow_hold: bool) -> AnalogStored:
+def _analog_cell_from_json(raw: Any) -> AnalogStored:
     if raw == "hold":
-        if not allow_hold:
-            raise SequenceFileError('analog_entries "hold" requires file format version 4+')
         return ANALOG_HOLD
     try:
         return float(raw)
     except (TypeError, ValueError) as e:
-        raise SequenceFileError("Invalid analog_entries value") from e
+        raise SequenceFileError("Invalid analog cell value") from e
+
+
+def _analog_param_lists_for_row(
+    analog: dict[tuple[int, str, int], AnalogStored],
+    r: int,
+    cols: int,
+    row_software: tuple[str, ...],
+) -> dict[str, list[Any]]:
+    """``param_id`` -> list of length ``cols`` (``null`` = default)."""
+    if not (0 <= r < len(row_software)):
+        return {}
+    row_d: dict[str, list[Any]] = {}
+    for p in get_object(row_software[r]).analog_parameters:
+        seq: list[Any] = []
+        for c in range(cols):
+            key = (r, p.param_id, c)
+            if key in analog:
+                seq.append(_analog_to_json_value(analog[key]))
+            else:
+                seq.append(None)
+        if any(x is not None for x in seq):
+            row_d[p.param_id] = seq
+    return row_d
+
+
+def _device_rows_from_block(
+    block: SequenceBlock, rows: int, row_software: tuple[str, ...]
+) -> dict[str, dict[str, Any]]:
+    """``device_rows["<row>"] = { "states": [...], "frequency": [...], ... }`` (analog params as sibling keys)."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in range(rows):
+        state_list = [bool(block.channels.get((r, c), True)) for c in range(block.cols)]
+        an = _analog_param_lists_for_row(block.analog, r, block.cols, row_software)
+        row: dict[str, Any] = {"states": state_list}
+        row.update(an)
+        out[str(r)] = row
+    return out
+
+
+def _parse_device_rows(
+    device_rows: Any,
+    n_device_rows: int,
+    cols: int,
+    row_software: tuple[str, ...],
+) -> tuple[dict[tuple[int, int], bool], dict[tuple[int, str, int], AnalogStored]]:
+    if not isinstance(device_rows, dict):
+        raise SequenceFileError("device_rows must be an object")
+    channels: dict[tuple[int, int], bool] = {}
+    analog: dict[tuple[int, str, int], AnalogStored] = {}
+    for r in range(n_device_rows):
+        skey = str(r)
+        if skey not in device_rows:
+            raise SequenceFileError(f"device_rows missing key {skey!r}")
+        row = device_rows[skey]
+        if not isinstance(row, dict):
+            raise SequenceFileError("device row must be an object")
+        states = row.get("states")
+        if not isinstance(states, list) or len(states) != cols:
+            raise SequenceFileError("device row states must be a list of length cols")
+        for c, v in enumerate(states):
+            channels[(r, c)] = bool(v)
+        if 0 <= r < len(row_software):
+            valid_param = {p.param_id for p in get_object(row_software[r]).analog_parameters}
+        else:
+            valid_param = set()
+        for param_id, seq in row.items():
+            if param_id == "states":
+                continue
+            if param_id not in valid_param:
+                continue
+            if not isinstance(seq, list):
+                continue
+            pid = str(param_id)
+            for c, cell in enumerate(seq):
+                if c >= cols:
+                    break
+                if cell is None:
+                    continue
+                analog[(r, pid, c)] = _analog_cell_from_json(cell)
+    return channels, analog
 
 
 class SequenceFileError(ValueError):
     pass
 
 
-def model_to_payload(model: SequenceModel) -> dict[str, Any]:
-    analog_entries: list[dict[str, Any]] = []
-    for (r, param_id, c), v in model.analog.items():
-        analog_entries.append(
-            {"row": r, "param_id": param_id, "col": c, "value": _analog_to_json_value(v)}
-        )
-    return {
-        "rows": model.rows,
-        "cols": model.cols,
-        "channels": [
-            [model.channel(r, c) for c in range(model.cols)] for r in range(model.rows)
-        ],
-        "row_software": [model.row_software_name(r) for r in range(model.rows)],
-        "delays_us": [model.delay_us(c, 0.0) for c in range(model.cols)],
-        "analog_entries": analog_entries,
-        "row_labels": list(model.row_labels),
-    }
-
-
-def _block_payload(block: SequenceBlock, rows: int) -> dict[str, Any]:
-    analog_entries: list[dict[str, Any]] = []
-    for (r, param_id, c), v in block.analog.items():
-        analog_entries.append(
-            {"row": r, "param_id": param_id, "col": c, "value": _analog_to_json_value(v)}
-        )
+def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str, Any]:
+    rows = document.rows
     return {
         "name": block.name,
         "enabled": block.enabled,
         "cols": block.cols,
-        "channels": [
-            [block.channels.get((r, c), True) for c in range(block.cols)] for r in range(rows)
-        ],
         "delays_us": [block.delays_us.get(c, 0.0) for c in range(block.cols)],
-        "analog_entries": analog_entries,
+        "device_rows": _device_rows_from_block(block, rows, document.row_software),
     }
 
 
@@ -98,140 +138,31 @@ def document_to_payload(document: SequenceDocument) -> dict[str, Any]:
         "rows": document.rows,
         "row_labels": list(document.row_labels),
         "row_software": [document.row_software[r] for r in range(document.rows)],
-        "blocks": [_block_payload(b, document.rows) for b in document.blocks],
+        "blocks": [_block_payload(b, document) for b in document.blocks],
     }
 
 
-def _migrate_v1_analog(
-    rows: int,
-    cols: int,
-    an_rows: list[list[Any]],
-    row_software: tuple[str, ...],
-) -> dict[tuple[int, str, int], AnalogStored]:
-    analog: dict[tuple[int, str, int], AnalogStored] = {}
-    for r in range(rows):
-        obj = get_object(row_software[r])
-        params = obj.analog_parameters
-        if not params:
-            continue
-        pid = params[0].param_id
-        for c in range(cols):
-            analog[(r, pid, c)] = float(an_rows[r][c])
-    return analog
-
-
-def model_from_payload(data: dict[str, Any], *, format_version: int) -> SequenceModel:
-    try:
-        rows = int(data["rows"])
-        cols = int(data["cols"])
-        ch_rows = data["channels"]
-        delays = data["delays_us"]
-        labels = tuple(str(x) for x in data["row_labels"])
-    except (KeyError, TypeError, ValueError) as e:
-        raise SequenceFileError("Invalid sequence payload") from e
-
-    if len(labels) != rows:
-        raise SequenceFileError("row_labels length must match rows")
-    if len(ch_rows) != rows or any(len(row) != cols for row in ch_rows):
-        raise SequenceFileError("channels shape must match rows × cols")
-    if len(delays) != cols:
-        raise SequenceFileError("delays_us length must match cols")
-
-    channels: dict[tuple[int, int], bool] = {}
-    for r, row in enumerate(ch_rows):
-        for c, v in enumerate(row):
-            channels[(r, c)] = bool(v)
-
-    delays_us = {c: float(delays[c]) for c in range(cols)}
-
-    rs_raw = data.get("row_software")
-    if isinstance(rs_raw, list) and len(rs_raw) == rows:
-        row_software = tuple(str(rs_raw[i]) for i in range(rows))
-    else:
-        row_software = tuple(DEFAULT_ON_OBJECT for _ in range(rows))
-
-    if format_version >= 2:
-        allow_hold = format_version >= 4
-        analog: dict[tuple[int, str, int], AnalogStored] = {}
-        raw_entries = data.get("analog_entries")
-        if raw_entries is not None:
-            if not isinstance(raw_entries, list):
-                raise SequenceFileError("analog_entries must be a list")
-            for item in raw_entries:
-                try:
-                    r = int(item["row"])
-                    pid = str(item["param_id"])
-                    c = int(item["col"])
-                    v = _analog_from_json_value(item["value"], allow_hold=allow_hold)
-                except SequenceFileError:
-                    raise
-                except (KeyError, TypeError, ValueError) as e:
-                    raise SequenceFileError("Invalid analog_entries item") from e
-                if not (0 <= r < rows and 0 <= c < cols):
-                    raise SequenceFileError("analog_entries index out of range")
-                analog[(r, pid, c)] = v
-    else:
-        an_rows = data.get("analog")
-        if not isinstance(an_rows, list):
-            raise SequenceFileError("analog must be a list (v1)")
-        if len(an_rows) != rows or any(len(row) != cols for row in an_rows):
-            raise SequenceFileError("analog shape must match rows × cols (v1)")
-        analog = _migrate_v1_analog(rows, cols, an_rows, row_software)
-
-    return SequenceModel(
-        rows=rows,
-        cols=cols,
-        channels=channels,
-        delays_us=delays_us,
-        analog=analog,
-        row_labels=labels,
-        row_software=row_software,
-    )
-
-
-def _block_from_payload(data: dict[str, Any], rows: int, *, format_version: int) -> SequenceBlock:
+def _block_from_payload(
+    data: dict[str, Any], rows: int, row_software: tuple[str, ...]
+) -> SequenceBlock:
     try:
         name = str(data["name"])
         enabled = bool(data.get("enabled", True))
         cols = int(data["cols"])
-        ch_rows = data["channels"]
         delays = data["delays_us"]
     except (KeyError, TypeError, ValueError) as e:
         raise SequenceFileError("Invalid block payload") from e
 
     if cols < 1:
         raise SequenceFileError("block cols must be positive")
-    if len(ch_rows) != rows or any(len(row) != cols for row in ch_rows):
-        raise SequenceFileError("block channels shape must match rows × cols")
     if len(delays) != cols:
         raise SequenceFileError("block delays_us length must match cols")
 
-    channels: dict[tuple[int, int], bool] = {}
-    for r, row in enumerate(ch_rows):
-        for c, v in enumerate(row):
-            channels[(r, c)] = bool(v)
+    channels, analog = _parse_device_rows(
+        data.get("device_rows"), rows, cols, row_software
+    )
 
     delays_us = {c: float(delays[c]) for c in range(cols)}
-
-    allow_hold = format_version >= 4
-    analog: dict[tuple[int, str, int], AnalogStored] = {}
-    raw_entries = data.get("analog_entries")
-    if raw_entries is not None:
-        if not isinstance(raw_entries, list):
-            raise SequenceFileError("analog_entries must be a list")
-        for item in raw_entries:
-            try:
-                r = int(item["row"])
-                pid = str(item["param_id"])
-                c = int(item["col"])
-                v = _analog_from_json_value(item["value"], allow_hold=allow_hold)
-            except SequenceFileError:
-                raise
-            except (KeyError, TypeError, ValueError) as e:
-                raise SequenceFileError("Invalid analog_entries item") from e
-            if not (0 <= r < rows and 0 <= c < cols):
-                raise SequenceFileError("analog_entries index out of range")
-            analog[(r, pid, c)] = v
 
     return SequenceBlock(
         name=name,
@@ -243,7 +174,37 @@ def _block_from_payload(data: dict[str, Any], rows: int, *, format_version: int)
     )
 
 
-def document_from_payload(data: dict[str, Any], *, format_version: int) -> SequenceDocument:
+def sequence_model_from_hero_block(
+    document: dict[str, Any], block: dict[str, Any]
+) -> SequenceModel:
+    """
+    One block + document header as in :func:`live_sequence_file_dict` / :func:`set_sequence_data`.
+    Resolves ``hold`` the same as the GUI via :meth:`~sequencer_gui.domain.model.SequenceModel.analog_value`.
+    """
+    try:
+        nrows = int(document["rows"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("invalid document for sequence_model_from_hero_block") from e
+    labels = tuple(str(x) for x in document.get("row_labels", ()))
+    rs = document.get("row_software")
+    if not isinstance(rs, list):
+        rs = []
+    row_software = tuple(
+        str(rs[i]) if i < len(rs) else DEFAULT_ON_OBJECT for i in range(nrows)
+    )
+    sb = _block_from_payload(block, nrows, row_software)
+    return SequenceModel(
+        rows=nrows,
+        cols=sb.cols,
+        channels=dict(sb.channels),
+        delays_us=dict(sb.delays_us),
+        analog=dict(sb.analog),
+        row_labels=labels,
+        row_software=row_software,
+    )
+
+
+def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
     try:
         rows = int(data["rows"])
         labels = tuple(str(x) for x in data["row_labels"])
@@ -262,7 +223,7 @@ def document_from_payload(data: dict[str, Any], *, format_version: int) -> Seque
     else:
         row_software = tuple(DEFAULT_ON_OBJECT for _ in range(rows))
 
-    blocks = tuple(_block_from_payload(b, rows, format_version=format_version) for b in raw_blocks)
+    blocks = tuple(_block_from_payload(b, rows, row_software) for b in raw_blocks)
     return SequenceDocument(rows=rows, row_labels=labels, row_software=row_software, blocks=blocks)
 
 
@@ -293,23 +254,19 @@ def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:
 
     if doc.get("format") != FORMAT_ID:
         raise SequenceFileError("Not a sequencer_gui sequence file (wrong format).")
-    ver = int(doc.get("version", 0))
-    if ver < 1 or ver > FORMAT_VERSION:
+    try:
+        ver = int(doc["version"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise SequenceFileError("Invalid or missing sequence file version.") from e
+    if ver != FORMAT_VERSION:
         raise SequenceFileError("Unsupported sequence file version.")
 
     name = str(doc.get("name", "Untitled"))
 
-    if ver <= 2:
-        raw_model = doc.get("model")
-        if not isinstance(raw_model, dict):
-            raise SequenceFileError("Missing model payload (v1/v2).")
-        model = model_from_payload(raw_model, format_version=ver)
-        return name, document_from_single_model(model, "Block 1")
-
     raw_document = doc.get("document")
     if not isinstance(raw_document, dict):
-        raise SequenceFileError("Missing document payload (v3+).")
-    document = document_from_payload(raw_document, format_version=ver)
+        raise SequenceFileError("Missing document payload.")
+    document = document_from_payload(raw_document)
     return name, document
 
 

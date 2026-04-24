@@ -9,7 +9,12 @@ import numpy
 
 from heros import LocalHERO
 
+from sequencer_gui.sequence_io import sequence_model_from_hero_block
+
 FILE_NAME = os.path.basename(__file__)
+
+# DDS: ``AnalogParameterSpec.param_id`` in JSON ``device_rows[…]["frequency"]`` (Detuning MHz).
+_DDS_FREQUENCY_PARAM = "frequency"
 
 
 class Sequencer_HERO(LocalHERO):
@@ -118,11 +123,8 @@ class Sequencer_HERO(LocalHERO):
     def get_bool_from_json_file(
         self, block_index: int, device_index: int, time_slot_index: int
     ) -> bool:
-        return bool(
-            self._sequence_snapshot()["document"]["blocks"][block_index]["channels"][
-                device_index
-            ][time_slot_index]
-        )
+        block = self._sequence_snapshot()["document"]["blocks"][block_index]
+        return bool(block["device_rows"][str(int(device_index))]["states"][time_slot_index])
 
     def get_delays_us_from_json_file(self, block_index: int, time_slot_index: int) -> float:
         return float(self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][time_slot_index])
@@ -136,7 +138,14 @@ class Sequencer_HERO(LocalHERO):
         return float(self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][time_slot_index])
     
     def get_seq_bool(self, block_index: int, time_slot_index: int, device_index: int) -> bool:
-        return bool(self._sequence_snapshot()["document"]["blocks"][block_index]["channels"][device_index][time_slot_index])
+        block = self._sequence_snapshot()["document"]["blocks"][block_index]
+        return bool(block["device_rows"][str(int(device_index))]["states"][time_slot_index])
+    
+    def get_seq_detuning(self, block_index: int, time_slot_index: int, device_index: int = 0) -> float:
+        block = self._sequence_snapshot()["document"]["blocks"][block_index]
+        value = block["device_rows"][str(int(device_index))]["frequency"][time_slot_index]
+        return 0.0 if value is None else float(value)
+   
 
 
 if __name__ == "__main__":
