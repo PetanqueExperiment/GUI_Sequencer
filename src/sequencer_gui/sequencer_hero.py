@@ -9,9 +9,8 @@ import numpy
 
 from heros import LocalHERO
 
+from sequencer_gui.process_identity import HERO_INSTANCE_NAME, PROCESS_DISPLAY_NAME, SOFTWARE_PID
 from sequencer_gui.sequence_io import sequence_model_from_hero_block
-
-FILE_NAME = os.path.basename(__file__)
 
 # DDS: ``AnalogParameterSpec.param_id`` in JSON ``device_rows[…]["frequency"]`` (Detuning MHz).
 _DDS_FREQUENCY_PARAM = "frequency"
@@ -149,12 +148,19 @@ class Sequencer_HERO(LocalHERO):
 
 
 if __name__ == "__main__":
-    if sys.stdout.isatty():
-        sys.stdout.write(f"\033]0;{FILE_NAME}\007")
+    if "SEQUENCER_SOFTWARE_PID" not in os.environ:
+        os.environ["SEQUENCER_SOFTWARE_PID"] = str(SOFTWARE_PID)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleTitleW(PROCESS_DISPLAY_NAME)
+        except Exception:
+            pass
+    elif sys.stdout.isatty():
+        sys.stdout.write(f"\033]0;{PROCESS_DISPLAY_NAME}\007")
         sys.stdout.flush()
 
-    name = "Sequencer_HERO"
-
-    with Sequencer_HERO(name) as sequencer_hero:
+    with Sequencer_HERO(HERO_INSTANCE_NAME) as sequencer_hero:
         while True:
             time.sleep(1)
