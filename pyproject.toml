@@ -29,3 +29,8 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.setuptools.package-data]
+sequencer_gui = [
+    "resources/Petanque_sequencer.ico",
+]

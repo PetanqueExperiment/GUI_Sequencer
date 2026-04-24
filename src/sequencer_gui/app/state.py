@@ -215,7 +215,7 @@ class SequenceAppState(QObject):
         last = self._document.blocks[-1]
         new_b = SequenceBlock(
             name=f"Block {n}",
-            enabled=True,
+            enabled=False,
             cols=last.cols,
             channels={},
             delays_us={},
