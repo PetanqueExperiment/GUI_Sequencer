@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
@@ -75,7 +75,9 @@ class SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = ANALOG_HOLD if is_hold(value) else float(value)
+        a[(row, param_id, col)] = (
+            ANALOG_HOLD if is_holdish(value) else float(value)  # type: ignore[arg-type]
+        )
         return SequenceBlock(
             name=self.name,
             enabled=self.enabled,

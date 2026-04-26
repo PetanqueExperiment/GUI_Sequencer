@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sequencer_gui.software_objects.aom import AOM_ID, AomObject
+from sequencer_gui.software_objects.current_source import (
+    CURRENT_SOURCE_ID,
+    CurrentSourceObject,
+)
 from sequencer_gui.software_objects.dds import DDS_ID, DdsObject
 from sequencer_gui.software_objects.protocol import SoftwareObject
 from sequencer_gui.software_objects.shutter import SHUTTER_ID, ShutterObject
@@ -44,6 +48,7 @@ CATALOG_ORDER: tuple[str, ...] = (
     SHUTTER_ID,
     TTL_ID,
     DDS_ID,
+    CURRENT_SOURCE_ID,
 )
 
 
@@ -52,6 +57,7 @@ def _build_registry() -> None:
     register(ShutterObject())
     register(TtlObject())
     register(DdsObject())
+    register(CurrentSourceObject())
 
 
 _build_registry()

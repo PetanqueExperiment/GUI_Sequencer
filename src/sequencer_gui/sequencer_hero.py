@@ -10,11 +10,11 @@ import numpy
 from heros import LocalHERO
 
 from sequencer_gui.process_identity import HERO_INSTANCE_NAME, PROCESS_DISPLAY_NAME, SOFTWARE_PID
+from sequencer_gui.domain.analog_stored import HOLD_SIGNAL
 from sequencer_gui.sequence_io import sequence_model_from_hero_block
 
 # DDS: ``AnalogParameterSpec.param_id`` in JSON ``device_rows[…]["frequency"]`` (Detuning MHz).
 _DDS_FREQUENCY_PARAM = "frequency"
-
 
 class Sequencer_HERO(LocalHERO):
     """
@@ -26,6 +26,11 @@ class Sequencer_HERO(LocalHERO):
     :meth:`heros.heros.LocalHERO.__init__` *before* any code in this class that runs after
     :keyword:`super`. Bind ``_sequence_data`` and ``dict`` **before** :keyword:`super` so
     ``getattr(self, \"dict\")`` during capability registration cannot fail.
+
+    The integer pair ``(`` :attr:`_param_rev` ``,`` :attr:`_param_acked_rev` ``)`` lets a second
+    process know whether the JSON snapshot (the same one returned by
+    :meth:`export_sequence_data` / read via the ``get_seq_*`` helpers) is still the one it last
+    fully applied: see :meth:`get_seq_parameters_stale` and :meth:`ack_seq_parameters_reloaded`.
 
     Integer parameters and return values: use quoted annotations such as ``"numpy.int32"`` in
     source and ``numpy.int32(...)`` at runtime. Plain ``int`` and ARTIQ host ``TInt32`` are
@@ -40,6 +45,9 @@ class Sequencer_HERO(LocalHERO):
         # Same id as _sequence_data; heros _capabilities may getattr(self, "dict") before post-super code runs.
         object.__setattr__(self, "dict", d)
         super().__init__(name, *args, **kwargs)
+        object.__setattr__(self, "_param_rev", 0)
+        # ``-1`` never matches any post-increment rev so the consumer sees "stale" until first ack.
+        object.__setattr__(self, "_param_acked_rev", -1)
         self.load_json_file(r"C:\Users\PETANQUE-PC\Desktop\Tom\sequencer_test.json")
 
     def _sequence_snapshot(self) -> Dict[str, Any]:
@@ -54,6 +62,8 @@ class Sequencer_HERO(LocalHERO):
 
     def set_sequence_data(self, data: Dict[str, Any]) -> None:
         """Replace the in-memory sequence (GUI calls this; same shape as a ``.json`` file)."""
+        pr = int(getattr(self, "_param_rev", 0)) + 1
+        object.__setattr__(self, "_param_rev", pr)
         object.__setattr__(self, "_sequence_data", data)
         object.__setattr__(self, "dict", data)
 
@@ -128,6 +138,24 @@ class Sequencer_HERO(LocalHERO):
     def get_delays_us_from_json_file(self, block_index: int, time_slot_index: int) -> float:
         return float(self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][time_slot_index])
 
+    def get_seq_parameters_stale(self) -> bool:
+        """
+        ``True`` if the in-memory sequence snapshot was replaced since the last
+        :meth:`ack_seq_parameters_reloaded` (e.g. the external program should re-read
+        :meth:`export_sequence_data` or the various ``get_seq_*`` / ``get_*`` accessors).
+        """
+        return int(getattr(self, "_param_rev", 0)) != int(getattr(self, "_param_acked_rev", -1))
+
+    def ack_seq_parameters_reloaded(self) -> None:
+        """
+        Mark the current snapshot as fully consumed by the external program (sets "last time" to
+        the active revision; :meth:`get_seq_parameters_stale` becomes false until the next
+        :meth:`set_sequence_data` / file load).
+        """
+        object.__setattr__(
+            self, "_param_acked_rev", int(getattr(self, "_param_rev", 0))
+        )
+
     def export_sequence_data(self) -> Dict[str, Any]:
         """Shallow copy of the live snapshot (avoids a method name ending in ``get_dict`` for heros)."""
         m = self._sequence_snapshot()
@@ -143,6 +171,17 @@ class Sequencer_HERO(LocalHERO):
     def get_seq_detuning(self, block_index: int, time_slot_index: int, device_index: int = 0) -> float:
         block = self._sequence_snapshot()["document"]["blocks"][block_index]
         value = block["device_rows"][str(int(device_index))]["frequency"][time_slot_index]
+        return 0.0 if value is None else float(value)
+   
+    def get_seq_current(self, block_index: int, time_slot_index: int, device_index: int = 0) -> float:
+        block = self._sequence_snapshot()["document"]["blocks"][block_index]
+        value = block["device_rows"][str(int(device_index))].get("current", None)
+        if value is not None:
+            value = value[time_slot_index]
+        
+        if value == "hold":
+            return HOLD_SIGNAL
+   
         return 0.0 if value is None else float(value)
    
 

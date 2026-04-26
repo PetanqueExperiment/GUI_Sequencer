@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import QApplication
 from sequencer_gui.app.backend import NoOpBackend
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.document import default_document
+from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS
 from sequencer_gui.persistence import load_last_sequence_path, load_row_labels
 from sequencer_gui.process_identity import (
     HERO_INSTANCE_NAME,
@@ -26,7 +27,7 @@ from sequencer_gui.ui.main_window import MainWindow
 
 def _load_initial_sequence() -> tuple[object, str]:
     """Return (document, sequence_name) for initial window."""
-    rows = 4
+    rows = DEFAULT_DEVICE_ROWS
     labels = load_row_labels(rows)
     document = default_document(labels)
     sequence_name = "Untitled"

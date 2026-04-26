@@ -3,6 +3,11 @@ Save/load sequence definitions to disk (JSON, versioned).
 
 Top-level: ``format`` / ``version`` (must match :data:`FORMAT_VERSION`) / ``name`` / ``document``.
 
+If a file has fewer top-level device ``rows`` than ``DEFAULT_DEVICE_ROWS`` in
+:mod:`sequencer_gui.domain.model`, it is **upgraded** on load: new rows
+get the default per-row software object, all-on ``states``, and no explicit analog (defaults apply).
+Missing ``device_rows[…]`` keys for an index in a block are treated the same for that row.
+
 Each **block** uses ``device_rows``: ``"0"`` … (device row index) -> ``{ "states": [ bool, … ], "frequency": [ … ], "amplitude": [ … ], … }`` —
 ``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, or ``null`` (default). Reserved key: ``states`` only.
 """
@@ -13,20 +18,17 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
-from sequencer_gui.domain.model import SequenceModel
+from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, SequenceModel
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 FORMAT_ID = "sequencer_gui_sequence"
 FORMAT_VERSION = 8
 
-# Fixed hardware rows for this build (matches toolbar validation).
-_REQUIRED_ROWS = 4
-
 
 def _analog_to_json_value(v: AnalogStored) -> float | str:
-    return "hold" if is_hold(v) else float(v)
+    return "hold" if is_holdish(v) else float(v)
 
 
 def _analog_cell_from_json(raw: Any) -> AnalogStored:
@@ -88,7 +90,9 @@ def _parse_device_rows(
     for r in range(n_device_rows):
         skey = str(r)
         if skey not in device_rows:
-            raise SequenceFileError(f"device_rows missing key {skey!r}")
+            for c in range(cols):
+                channels[(r, c)] = True
+            continue
         row = device_rows[skey]
         if not isinstance(row, dict):
             raise SequenceFileError("device row must be an object")
@@ -182,9 +186,10 @@ def sequence_model_from_hero_block(
     Resolves ``hold`` the same as the GUI via :meth:`~sequencer_gui.domain.model.SequenceModel.analog_value`.
     """
     try:
-        nrows = int(document["rows"])
+        file_rows = int(document["rows"])
     except (KeyError, TypeError, ValueError) as e:
         raise ValueError("invalid document for sequence_model_from_hero_block") from e
+    nrows = max(file_rows, DEFAULT_DEVICE_ROWS)
     labels = tuple(str(x) for x in document.get("row_labels", ()))
     rs = document.get("row_software")
     if not isinstance(rs, list):
@@ -206,22 +211,35 @@ def sequence_model_from_hero_block(
 
 def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
     try:
-        rows = int(data["rows"])
-        labels = tuple(str(x) for x in data["row_labels"])
-        raw_blocks = data["blocks"]
+        file_rows = int(data["rows"])
     except (KeyError, TypeError, ValueError) as e:
         raise SequenceFileError("Invalid document payload") from e
 
-    if len(labels) != rows:
-        raise SequenceFileError("row_labels length must match rows")
+    if file_rows < 1:
+        raise SequenceFileError("rows must be positive")
+    try:
+        raw_labels = data["row_labels"]
+        raw_blocks = data["blocks"]
+    except KeyError as e:
+        raise SequenceFileError("Invalid document payload") from e
+    if not isinstance(raw_labels, list):
+        raise SequenceFileError("row_labels must be a list")
     if not isinstance(raw_blocks, list) or len(raw_blocks) < 1:
         raise SequenceFileError("document must have at least one block")
+    if len(raw_labels) > file_rows:
+        raw_labels = raw_labels[:file_rows]
+    labels = tuple(str(x) for x in raw_labels)
 
+    # Older files with fewer device rows are upgraded so the rest use defaults.
+    rows = max(file_rows, DEFAULT_DEVICE_ROWS)
     rs_raw = data.get("row_software")
-    if isinstance(rs_raw, list) and len(rs_raw) == rows:
-        row_software = tuple(str(rs_raw[i]) for i in range(rows))
-    else:
-        row_software = tuple(DEFAULT_ON_OBJECT for _ in range(rows))
+    if not isinstance(rs_raw, list):
+        rs_raw = []
+    if len(rs_raw) > file_rows:
+        rs_raw = rs_raw[:file_rows]
+    row_software = tuple(
+        str(rs_raw[i]) if i < len(rs_raw) else DEFAULT_ON_OBJECT for i in range(rows)
+    )
 
     blocks = tuple(_block_from_payload(b, rows, row_software) for b in raw_blocks)
     return SequenceDocument(rows=rows, row_labels=labels, row_software=row_software, blocks=blocks)
@@ -272,8 +290,8 @@ def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:
 
 def validate_document_for_ui(document: SequenceDocument) -> str | None:
     """Return an error message if the document cannot be loaded in this build, else None."""
-    if document.rows != _REQUIRED_ROWS:
-        return f"This build only supports {_REQUIRED_ROWS} rows (file has {document.rows})."
+    if document.rows < DEFAULT_DEVICE_ROWS:
+        return f"This build supports at least {DEFAULT_DEVICE_ROWS} device rows (document has {document.rows})."
     for i, b in enumerate(document.blocks):
         if b.cols < 1:
             return f"Block {i + 1} has invalid length."

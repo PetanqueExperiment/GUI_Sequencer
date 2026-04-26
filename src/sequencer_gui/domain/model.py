@@ -3,15 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_hold
+from sequencer_gui.domain.analog_stored import (
+    ANALOG_HOLD,
+    AnalogStored,
+    is_hold_signal,
+    is_holdish,
+)
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
+
+# Change this to bump the number of device rows; older JSON is upscaled on load (see `sequence_io`).
+DEFAULT_DEVICE_ROWS: int = 8
 
 
 @dataclass(frozen=True)
 class SequenceModel:
     """Pure data for channel grid, per-column delays, analog values, row labels, and per-row software."""
 
-    rows: int = 4
+    rows: int = DEFAULT_DEVICE_ROWS
     cols: int = 8
     channels: Dict[Tuple[int, int], bool] = field(default_factory=dict)
     delays_us: Dict[int, float] = field(default_factory=dict)
@@ -56,7 +64,7 @@ class SequenceModel:
         key = (row, param_id, col)
         if key in self.analog:
             v = self.analog[key]
-            if is_hold(v):
+            if is_holdish(v):
                 if col <= 0:
                     return self._default_analog_for_param(row, param_id)
                 return self.analog_value(row, param_id, col - 1)
@@ -70,9 +78,11 @@ class SequenceModel:
     def analog_display_text(self, row: int, param_id: str, col: int, *, decimals: int) -> str:
         """Text shown in the cell: '-' for hold, else formatted resolved number."""
         key = (row, param_id, col)
-        if key in self.analog and is_hold(self.analog[key]):
+        if key in self.analog and is_holdish(self.analog[key]):
             return "-"
         v = self.analog_value(row, param_id, col)
+        if is_hold_signal(v):
+            return "-"
         return format(v, f".{decimals}f")
 
     def with_channel(self, row: int, col: int, on: bool) -> SequenceModel:
@@ -131,7 +141,9 @@ class SequenceModel:
         if not (0 <= row < self.rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = ANALOG_HOLD if is_hold(value) else float(value)
+        a[(row, param_id, col)] = (
+            ANALOG_HOLD if is_holdish(value) else float(value)  # type: ignore[arg-type]
+        )
         return SequenceModel(
             rows=self.rows,
             cols=self.cols,
