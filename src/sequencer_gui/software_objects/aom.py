@@ -21,7 +21,7 @@ class AomObject:
                 default=0.0,
                 minimum=0.0,
                 maximum=1.0,
-                decimals=1,
+                decimals=2,
                 single_step=0.0001,
             ),
             AnalogParameterSpec(

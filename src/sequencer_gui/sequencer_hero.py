@@ -121,28 +121,14 @@ class Sequencer_HERO(LocalHERO):
 
     def get_row_index_by_label(self, label: str) -> "numpy.int32":
         """
-        Return the device row index for a label in ``document['row_labels']``,
-        or -1 if missing.
+        Return the device row index for a GUI row label in ``document['row_labels']``
+        (e.g. ``Shutter_IMG``, ``Trigger Camera``), or ``-1`` if the label is absent.
         """
         try:
             labels: list = self._sequence_snapshot()["document"]["row_labels"]
             return numpy.int32(labels.index(label))
         except (ValueError, KeyError, TypeError, AttributeError):
             return numpy.int32(-1)
-
-    def get_shutter_img_row(self) -> "numpy.int32":
-        """Row index for ``Shutter_IMG``; defaults to 1 (legacy hardcoded) if not found."""
-        r = self.get_row_index_by_label("Shutter_IMG")
-        if r < 0:
-            return numpy.int32(1)
-        return numpy.int32(r)
-
-    def get_trigger_camera_row(self) -> "numpy.int32":
-        """Row index for ``Trigger Camera``; defaults to 2 (legacy hardcoded) if not found."""
-        r = self.get_row_index_by_label("Trigger Camera")
-        if r < 0:
-            return numpy.int32(2)
-        return numpy.int32(r)
 
     def get_seq_parameters_stale(self) -> bool:
         """
