@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sequencer_gui.domain.analog_stored import HOLD_SIGNAL
 from sequencer_gui.software_objects.types import AnalogParameterSpec
 
 AOM_ID = "aom"
@@ -18,7 +19,7 @@ class AomObject:
             AnalogParameterSpec(
                 param_id="amplitude",
                 label="Amplitude",
-                default=0.0,
+                default=HOLD_SIGNAL,
                 minimum=0.0,
                 maximum=1.0,
                 decimals=2,
@@ -27,7 +28,7 @@ class AomObject:
             AnalogParameterSpec(
                 param_id="frequency",
                 label="Frequency (MHz)",
-                default=80.0,
+                default=HOLD_SIGNAL,
                 minimum=0.0,
                 maximum=500.0,
                 decimals=1,
