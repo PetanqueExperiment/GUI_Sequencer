@@ -14,6 +14,8 @@ class _SequenceDataHost(Protocol):
 
     def set_sequence_data(self, data: dict[str, Any]) -> None: ...
 
+    def set_run_sequence(self, on: bool) -> None: ...
+
 
 class HeroDictBackend:
     """
@@ -27,6 +29,9 @@ class HeroDictBackend:
 
     def sync_sequence_snapshot(self, document: SequenceDocument, sequence_name: str) -> None:
         self._host.set_sequence_data(live_sequence_file_dict(sequence_name, document))
+
+    def sync_run_sequence(self, on: bool) -> None:
+        self._host.set_run_sequence(on)
 
     def apply(self, model: SequenceModel) -> None:
         del model

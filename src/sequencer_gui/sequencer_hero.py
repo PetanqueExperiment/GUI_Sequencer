@@ -46,6 +46,8 @@ class Sequencer_HERO(LocalHERO):
         # Same id as _sequence_data; heros _capabilities may getattr(self, "dict") before post-super code runs.
         object.__setattr__(self, "dict", d)
         super().__init__(name, *args, **kwargs)
+        # GUI Pause/Resume; not part of ``set_sequence_data`` / saved JSON.
+        object.__setattr__(self, "_run_sequence", True)
         object.__setattr__(self, "_param_rev", 0)
         # ``-1`` never matches any post-increment rev so the consumer sees "stale" until first ack.
         object.__setattr__(self, "_param_acked_rev", -1)
@@ -322,7 +324,15 @@ class Sequencer_HERO(LocalHERO):
     ) -> float:
         return self.get_seq_float(
             block_index, time_slot_index, _DDS_FREQUENCY_PARAM, device_index
-        )  
+        )
+
+    def set_run_sequence(self, on: bool) -> None:
+        """Set from the GUI only; independent of the JSON snapshot."""
+        object.__setattr__(self, "_run_sequence", bool(on))
+
+    def get_run_sequence(self) -> bool:
+        """True = run allowed; false = paused (see :meth:`set_run_sequence`)."""
+        return bool(getattr(self, "_run_sequence", True))
 
 
 if __name__ == "__main__":

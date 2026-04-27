@@ -43,6 +43,15 @@ class SequenceToolbar(QGroupBox):
         self._name.editingFinished.connect(self._on_name_edited)
         row.addWidget(self._name, 0)
 
+        self._run_btn = QPushButton()
+        self._run_btn.setCheckable(True)
+        self._run_btn.setChecked(state.run_sequence)
+        self._run_btn.setToolTip("Pause/Resume: host reads run state on the in-process HERO (not in saved files).")
+        self._run_btn.toggled.connect(self._on_run_toggled)
+        self._update_run_button_text(state.run_sequence)
+        state.run_sequence_changed.connect(self._on_run_sequence_changed)
+        row.addWidget(self._run_btn, 0)
+
         btn_save = QPushButton("Save…")
         btn_save.clicked.connect(self._on_save)
         row.addWidget(btn_save)
@@ -58,6 +67,21 @@ class SequenceToolbar(QGroupBox):
             self._name.blockSignals(True)
             self._name.setText(name)
             self._name.blockSignals(False)
+
+    def _update_run_button_text(self, on: bool) -> None:
+        # ``on`` = allow running; button shows "Pause" to mean "click to pause".
+        self._run_btn.setText("Running" if on else "Paused")
+
+    def _on_run_toggled(self, checked: bool) -> None:
+        self._state.set_run_sequence(checked)
+        self._update_run_button_text(checked)
+
+    def _on_run_sequence_changed(self, on: bool) -> None:
+        if self._run_btn.isChecked() != on:
+            self._run_btn.blockSignals(True)
+            self._run_btn.setChecked(on)
+            self._run_btn.blockSignals(False)
+        self._update_run_button_text(on)
 
     def _on_name_edited(self) -> None:
         self._state.set_sequence_name(self._name.text())

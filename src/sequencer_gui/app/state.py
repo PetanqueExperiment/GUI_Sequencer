@@ -41,6 +41,7 @@ class SequenceAppState(QObject):
     analog_changed = pyqtSignal()
     row_labels_changed = pyqtSignal()
     sequence_name_changed = pyqtSignal(str)
+    run_sequence_changed = pyqtSignal(bool)
     document_changed = pyqtSignal(SequenceDocument)
     active_tab_changed = pyqtSignal(int)
 
@@ -61,6 +62,7 @@ class SequenceAppState(QObject):
             raise ValueError("document or model is required")
         self._active_tab = 0
         self._sequence_name = sequence_name
+        self._run_sequence = True
         self._notify_backend()
 
     def _notify_backend(self) -> None:
@@ -90,6 +92,18 @@ class SequenceAppState(QObject):
     @property
     def sequence_name(self) -> str:
         return self._sequence_name
+
+    @property
+    def run_sequence(self) -> bool:
+        """If False, the host should not run the sequence (pushed to the in-process HERO only; not saved in files)."""
+        return self._run_sequence
+
+    def set_run_sequence(self, on: bool) -> None:
+        if self._run_sequence == on:
+            return
+        self._run_sequence = on
+        self.run_sequence_changed.emit(on)
+        self._backend.sync_run_sequence(on)
 
     def set_sequence_name(self, name: str) -> None:
         self._sequence_name = name

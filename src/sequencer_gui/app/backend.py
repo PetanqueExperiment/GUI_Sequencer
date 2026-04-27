@@ -15,10 +15,17 @@ class SequenceBackendProtocol(Protocol):
         """Full multi-block document + name (e.g. same shape as a saved JSON file, for HERO or IPC)."""
         ...
 
+    def sync_run_sequence(self, on: bool) -> None:
+        """GUI run/pause toggle; host-only, not part of the sequence file (HERO: ``set_run_sequence``)."""
+        ...
+
 
 class NoOpBackend:
     def sync_sequence_snapshot(self, document: SequenceDocument, sequence_name: str) -> None:
         del document, sequence_name
+
+    def sync_run_sequence(self, on: bool) -> None:
+        del on
 
     def apply(self, model: SequenceModel) -> None:
         del model  # unused; placeholder for ArtiQ integration
