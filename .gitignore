@@ -1,4 +1,3 @@
 venv_sequencer/
 **/__pycache__/
 *.pyc
-src/sequencer_gui/domain/__pycache__/
