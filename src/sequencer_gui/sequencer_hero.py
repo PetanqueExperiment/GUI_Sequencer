@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import numpy
 
@@ -15,6 +15,7 @@ from sequencer_gui.sequence_io import sequence_model_from_hero_block
 
 # DDS: ``AnalogParameterSpec.param_id`` in JSON ``device_rows[…]["frequency"]`` (Detuning MHz).
 _DDS_FREQUENCY_PARAM = "frequency"
+
 
 class Sequencer_HERO(LocalHERO):
     """
@@ -48,7 +49,17 @@ class Sequencer_HERO(LocalHERO):
         object.__setattr__(self, "_param_rev", 0)
         # ``-1`` never matches any post-increment rev so the consumer sees "stale" until first ack.
         object.__setattr__(self, "_param_acked_rev", -1)
-        self.load_json_file(r"C:\Users\PETANQUE-PC\Desktop\Tom\sequencer_test.json")
+        # Optional developer convenience: preload an initial JSON snapshot if explicitly requested.
+        # IMPORTANT: do not hardcode a path here; it can cause confusing "random" block counts when
+        # multiple HERO servers exist or when the GUI has not yet pushed its document.
+        init_path = os.environ.get("SEQUENCER_HERO_INIT_JSON")
+        if init_path:
+            try:
+                if os.path.isfile(init_path):
+                    self.load_json_file(init_path)
+            except Exception:
+                # Best-effort: the GUI will immediately push the authoritative document.
+                pass
 
     def _sequence_snapshot(self) -> Dict[str, Any]:
         """Live JSON-shaped mapping; use this from all heros-exposed methods."""
@@ -71,22 +82,10 @@ class Sequencer_HERO(LocalHERO):
         with open(file_path, "r") as file:
             self.set_sequence_data(json.load(file))
 
-    def get_float(self, key: str) -> float:
-        return float(self._sequence_snapshot()[key])
-
-    def get_bool(self, key: str) -> bool:
-        return bool(self._sequence_snapshot()[key])
-
     def get_n_blocks(self) -> "numpy.int32":
         """Number of sequence blocks in the current document (GUI rows are separate)."""
         return numpy.int32(
             len(self._sequence_snapshot().get("document", {}).get("blocks", []))
-        )
-
-    def get_n_rows(self) -> "numpy.int32":
-        """Number of device rows in the matrix (e.g. AOM, shutter, TTL, …)."""
-        return numpy.int32(
-            self._sequence_snapshot().get("document", {}).get("rows", 0)
         )
 
     def get_n_columns(self, block_index: "numpy.int32") -> "numpy.int32":
@@ -103,6 +102,20 @@ class Sequencer_HERO(LocalHERO):
         if "enabled" not in block:
             return True
         return bool(block["enabled"])
+
+    def get_total_nb_steps(self) -> "numpy.int32":
+        """
+        Number of time slots in the flattened timeline (enabled blocks only, in block order);
+        the value to use as ``length`` for :meth:`get_seq_float_list` / :meth:`get_seq_bool_list`
+        when you want the full sequence with no padding.
+        """
+        total = 0
+        n_blocks = int(self.get_n_blocks())
+        for b in range(n_blocks):
+            if not self.is_block_enabled(numpy.int32(b)):
+                continue
+            total += int(self.get_n_columns(numpy.int32(b)))
+        return numpy.int32(total)
 
     def get_row_index_by_label(self, label: str) -> "numpy.int32":
         """
@@ -129,15 +142,6 @@ class Sequencer_HERO(LocalHERO):
             return numpy.int32(2)
         return numpy.int32(r)
 
-    def get_bool_from_json_file(
-        self, block_index: int, device_index: int, time_slot_index: int
-    ) -> bool:
-        block = self._sequence_snapshot()["document"]["blocks"][block_index]
-        return bool(block["device_rows"][str(int(device_index))]["states"][time_slot_index])
-
-    def get_delays_us_from_json_file(self, block_index: int, time_slot_index: int) -> float:
-        return float(self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][time_slot_index])
-
     def get_seq_parameters_stale(self) -> bool:
         """
         ``True`` if the in-memory sequence snapshot was replaced since the last
@@ -161,29 +165,164 @@ class Sequencer_HERO(LocalHERO):
         m = self._sequence_snapshot()
         return builtins.dict(m)
 
+    @staticmethod
+    def _coerce_seq_analog_float(value: Any) -> float:
+        """JSON cell: number, the string ``hold``, or ``null``; ``hold`` and ``null`` both become :data:`HOLD_SIGNAL`."""
+        if value == "hold":
+            return HOLD_SIGNAL
+        if value is None:
+            return HOLD_SIGNAL
+        return float(value)
+
+    def get_seq_float(
+        self,
+        block_index: int,
+        time_slot_index: int,
+        param: str,
+        device_index: int = 0,
+    ) -> float:
+        """
+        Per-step float from ``device_rows`` for one analog list key (e.g. ``frequency`` for
+        detuning MHz, ``current``). The alias ``detuning`` maps to ``frequency``.
+
+        If the value is null or the string hold, a row or key is missing, the index is out of
+        range, or the JSON shape is wrong, returns :data:`HOLD_SIGNAL` (also for values that are
+        not coercible to a float).
+
+        For the block delay column in µs, use :meth:`get_seq_delay_us` (not stored on a device row).
+        """
+        p = (param or "").strip().lower()
+        if not p:
+            raise ValueError("param must be a non-empty string")
+        row_key = _DDS_FREQUENCY_PARAM if p == "detuning" else p
+        try:
+            block = self._sequence_snapshot()["document"]["blocks"][block_index]
+            device_rows = block["device_rows"]
+            row = device_rows[str(int(device_index))]
+        except (KeyError, IndexError, TypeError):
+            return HOLD_SIGNAL
+        if row_key not in row or row[row_key] is None:
+            return HOLD_SIGNAL
+        col = row[row_key]
+        try:
+            if time_slot_index < 0 or time_slot_index >= len(col):
+                return HOLD_SIGNAL
+            v = col[time_slot_index]
+        except (TypeError, KeyError, IndexError):
+            return HOLD_SIGNAL
+        try:
+            return self._coerce_seq_analog_float(v)
+        except (TypeError, ValueError, OverflowError):
+            return HOLD_SIGNAL
+
+    def get_seq_float_list(
+        self,
+        param: str,
+        length: int,
+        device_index: int = 0,
+    ) -> List[float]:
+        """
+        ``length``-element analog timeline: same block/column order as a kernel ``offset`` loop
+        (``param`` / ``device_index`` as :meth:`get_seq_float`). The result is **always** ``len ==
+        length``: excess steps in the document are **truncated**; if the sequence is shorter, the
+        tail is padded with :data:`HOLD_SIGNAL` (``null`` / hold semantics for unused table slots).
+        For per-column block delays, use :meth:`get_seq_delay_list`.
+        """
+        if length < 0:
+            raise ValueError("length must be non-negative")
+        if length == 0:
+            return []
+        out: List[float] = []
+        n_blocks = int(self.get_n_blocks())
+        for b in range(n_blocks):
+            if not self.is_block_enabled(numpy.int32(b)):
+                continue
+            n = int(self.get_n_columns(numpy.int32(b)))
+            for i in range(n):
+                if len(out) == length:
+                    return out
+                out.append(self.get_seq_float(b, i, param, device_index))
+        while len(out) < length:
+            out.append(HOLD_SIGNAL)
+        return out
+
+    def get_seq_delay_list(
+        self,
+        length: int,
+        fill_extra_delay_us: float = 1.0,
+    ) -> List[float]:
+        """
+        ``length``-element ``delays_us`` timeline: same order as :meth:`get_seq_float_list` for a
+        row. **Always** ``len == length``: long sequences are **truncated**; short ones are **padded**
+        with ``fill_extra_delay_us`` (default ``1.0`` µs, a neutral one-microsecond step).
+        """
+        if length < 0:
+            raise ValueError("length must be non-negative")
+        if length == 0:
+            return []
+        out: List[float] = []
+        n_blocks = int(self.get_n_blocks())
+        for b in range(n_blocks):
+            if not self.is_block_enabled(numpy.int32(b)):
+                continue
+            n = int(self.get_n_columns(numpy.int32(b)))
+            for i in range(n):
+                if len(out) == length:
+                    return out
+                out.append(self.get_seq_delay_us(b, i))
+        while len(out) < length:
+            out.append(float(fill_extra_delay_us))
+        return out
+
     def get_seq_delay_us(self, block_index: int, time_slot_index: int) -> float:
-        return float(self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][time_slot_index])
-    
+        return float(
+            self._sequence_snapshot()["document"]["blocks"][block_index]["delays_us"][
+                time_slot_index
+            ]
+        )
+
     def get_seq_bool(self, block_index: int, time_slot_index: int, device_index: int) -> bool:
         block = self._sequence_snapshot()["document"]["blocks"][block_index]
         return bool(block["device_rows"][str(int(device_index))]["states"][time_slot_index])
-    
-    def get_seq_detuning(self, block_index: int, time_slot_index: int, device_index: int = 0) -> float:
-        block = self._sequence_snapshot()["document"]["blocks"][block_index]
-        value = block["device_rows"][str(int(device_index))]["frequency"][time_slot_index]
-        return 0.0 if value is None else float(value)
-   
-    def get_seq_current(self, block_index: int, time_slot_index: int, device_index: int = 0) -> float:
-        block = self._sequence_snapshot()["document"]["blocks"][block_index]
-        value = block["device_rows"][str(int(device_index))].get("current", None)
-        if value is not None:
-            value = value[time_slot_index]
-        
-        if value == "hold":
-            return HOLD_SIGNAL
-   
-        return 0.0 if value is None else float(value)
-   
+
+    def get_seq_bool_list(
+        self,
+        length: int,
+        device_index: int = 0,
+    ) -> List[bool]:
+        """
+        ``length``-element digital timeline: same block/column order as :meth:`get_seq_float_list`
+        (``device_index`` selects the device row). The result is **always** ``len == length``:
+        excess steps are **truncated**; if the sequence is shorter, the tail is padded with
+        ``False``; invalid or out-of-range cells are treated as ``False``.
+        """
+        if length < 0:
+            raise ValueError("length must be non-negative")
+        if length == 0:
+            return []
+        out: List[bool] = []
+        n_blocks = int(self.get_n_blocks())
+        for b in range(n_blocks):
+            if not self.is_block_enabled(numpy.int32(b)):
+                continue
+            n = int(self.get_n_columns(numpy.int32(b)))
+            for i in range(n):
+                if len(out) == length:
+                    return out
+                try:
+                    out.append(self.get_seq_bool(b, i, device_index))
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    out.append(False)
+        while len(out) < length:
+            out.append(False)
+        return out
+
+    def get_seq_detuning(
+        self, block_index: int, time_slot_index: int, device_index: int = 0
+    ) -> float:
+        return self.get_seq_float(
+            block_index, time_slot_index, _DDS_FREQUENCY_PARAM, device_index
+        )  
 
 
 if __name__ == "__main__":
@@ -200,6 +339,9 @@ if __name__ == "__main__":
         sys.stdout.write(f"\033]0;{PROCESS_DISPLAY_NAME}\007")
         sys.stdout.flush()
 
-    with Sequencer_HERO(HERO_INSTANCE_NAME) as sequencer_hero:
+    # Avoid name collisions with the GUI (which also runs a HERO named HERO_INSTANCE_NAME).
+    # If both are running and share the same name, clients may hit either server.
+    standalone_name = os.environ.get("SEQUENCER_HERO_NAME", f"{HERO_INSTANCE_NAME}_standalone")
+    with Sequencer_HERO(standalone_name) as sequencer_hero:
         while True:
             time.sleep(1)

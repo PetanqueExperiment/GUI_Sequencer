@@ -21,6 +21,7 @@ from sequencer_gui.process_identity import (
     SOFTWARE_PID,
     set_windows_taskbar_app_id,
 )
+from sequencer_gui.single_instance import acquire_single_instance
 from sequencer_gui.sequence_io import SequenceFileError, load_sequence, validate_document_for_ui
 from sequencer_gui.ui.main_window import MainWindow
 
@@ -77,6 +78,26 @@ def main() -> None:
             ctypes.windll.kernel32.SetConsoleTitleW(PROCESS_DISPLAY_NAME)
         except Exception:
             pass
+
+    # Prevent multiple GUI instances (and therefore multiple HERO providers) from running.
+    # Set SEQUENCER_ALLOW_MULTIPLE=1 to bypass for development.
+    if os.environ.get("SEQUENCER_ALLOW_MULTIPLE", "").strip() not in {"1", "true", "True"}:
+        lock = acquire_single_instance("Petanque.Sequencer.GUI")
+        if lock is None:
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        "Sequencer GUI is already running.\n\n"
+                        "Close the existing window (or end the python process) and try again.",
+                        PROCESS_DISPLAY_NAME,
+                        0x00000030,  # MB_ICONWARNING
+                    )
+                except Exception:
+                    pass
+            return
 
     QCoreApplication.setApplicationName(PROCESS_DISPLAY_NAME)
     QGuiApplication.setApplicationDisplayName(PROCESS_DISPLAY_NAME)
