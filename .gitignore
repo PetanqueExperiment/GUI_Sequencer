@@ -1,2 +1,3 @@
 venv_sequencer/
-src/sequencer_gui/__pycache__/
+**/__pycache__/
+*.pyc
