@@ -130,6 +130,13 @@ class Sequencer_HERO(LocalHERO):
         except (ValueError, KeyError, TypeError, AttributeError):
             return numpy.int32(-1)
 
+    def get_row_indices_by_labels(self, labels: List[str]) -> List["numpy.int32"]:
+        """
+        Return the device row index for each label in ``document['row_labels']``, in the same
+        order as ``labels``. Missing labels yield ``-1`` (see :meth:`get_row_index_by_label`).
+        """
+        return [self.get_row_index_by_label(lab) for lab in labels]
+
     def get_seq_parameters_stale(self) -> bool:
         """
         ``True`` if the in-memory sequence snapshot was replaced since the last
@@ -234,6 +241,21 @@ class Sequencer_HERO(LocalHERO):
             out.append(HOLD_SIGNAL)
         return out
 
+    def get_seq_float_list_by_label(
+        self,
+        param: str,
+        length: int,
+        device_label: str,
+    ) -> List[float]:
+        """
+        Like :meth:`get_seq_float_list` but the device row is chosen by GUI label
+        (``document['row_labels']``; see :meth:`get_row_index_by_label`). Unknown
+        labels become index ``-1``, consistent with the index-based API.
+        """
+        return self.get_seq_float_list(
+            param, length, int(self.get_row_index_by_label(device_label))
+        )
+
     def get_seq_delay_list(
         self,
         length: int,
@@ -304,6 +326,20 @@ class Sequencer_HERO(LocalHERO):
         while len(out) < length:
             out.append(False)
         return out
+
+    def get_seq_bool_list_by_label(
+        self,
+        length: int,
+        device_label: str,
+    ) -> List[bool]:
+        """
+        Like :meth:`get_seq_bool_list` but the device row is chosen by GUI label
+        (see :meth:`get_row_index_by_label`). Unknown labels become index ``-1``,
+        same semantics as the index-based method.
+        """
+        return self.get_seq_bool_list(
+            length, int(self.get_row_index_by_label(device_label))
+        )
 
     def get_seq_detuning(
         self, block_index: int, time_slot_index: int, device_index: int = 0
