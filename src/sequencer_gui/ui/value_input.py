@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from typing import Literal
@@ -43,6 +44,20 @@ def digit_step_left_of_cursor(numeric_text: str, cursor: int) -> float:
     else:
         exp = -(i - dot)
     return 10.0**exp
+
+
+def cursor_position_for_same_digit_step(numeric_text: str, step: float, fallback: int) -> int:
+    """
+    Rightmost cursor index in ``numeric_text`` where Up/Down would use the same ``step``
+    as ``digit_step_left_of_cursor`` (same decimal place). Falls back if no position matches.
+    """
+    matches: list[int] = []
+    for j in range(0, len(numeric_text) + 1):
+        if math.isclose(digit_step_left_of_cursor(numeric_text, j), step, rel_tol=0.0, abs_tol=1e-12):
+            matches.append(j)
+    if not matches:
+        return min(max(0, fallback), len(numeric_text))
+    return max(matches)
 
 
 def map_cursor_to_leading_float_text(full: str, cursor: int) -> tuple[str, int]:
@@ -182,7 +197,7 @@ class CommitFloatLineEdit(QLineEdit):
         self._style_guard = True
         self.setText(txt)
         self._style_guard = False
-        self.setCursorPosition(min(pos_before, len(txt)))
+        self.setCursorPosition(cursor_position_for_same_digit_step(txt, step, pos_before))
         self.setStyleSheet(_STYLE_EDITING)
         return True
 
