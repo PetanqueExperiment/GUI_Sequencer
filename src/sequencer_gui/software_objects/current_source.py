@@ -21,7 +21,7 @@ class CurrentSourceObject:
                 label="Current (A)",
                 default=HOLD_SIGNAL,
                 minimum=0.0,
-                maximum=10.0,
+                maximum=9.99,
                 decimals=3,
                 single_step=0.1,
             ),
