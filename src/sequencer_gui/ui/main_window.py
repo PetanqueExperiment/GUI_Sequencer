@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from PyQt5.QtCore import QByteArray, Qt
 from PyQt5.QtGui import QCloseEvent, QGuiApplication, QShowEvent
-from PyQt5.QtWidgets import QFrame, QMainWindow, QScrollArea, QTabBar, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QFrame, QHBoxLayout, QMainWindow, QScrollArea, QTabBar, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
 from sequencer_gui.persistence import load_window_geometry, save_row_labels, save_window_geometry
 from sequencer_gui.ui.block_strip import BlockStripWidget
 from sequencer_gui.ui.channel_matrix import ChannelMatrix
+from sequencer_gui.ui.scan_panel import ScanPanel
 from sequencer_gui.ui.sequence_toolbar import SequenceToolbar
 
 
@@ -26,8 +27,16 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
+        top_row = QWidget()
+        top_row_layout = QHBoxLayout(top_row)
+        top_row_layout.setContentsMargins(0, 0, 0, 0)
+        top_row_layout.setSpacing(10)
         toolbar = SequenceToolbar(state)
-        layout.addWidget(toolbar, 0, Qt.AlignLeft | Qt.AlignTop)
+        top_row_layout.addWidget(toolbar, 0, Qt.AlignLeft | Qt.AlignTop)
+        self._scan_panel = ScanPanel(state)
+        # Stretch so Scan (and its parameter cards) uses width to the right of Sequence, not a few pixels.
+        top_row_layout.addWidget(self._scan_panel, 1, Qt.AlignTop)
+        layout.addWidget(top_row, 0)
 
         self._strip = BlockStripWidget(state)
         layout.addWidget(self._strip, 0)

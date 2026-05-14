@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from sequencer_gui.app.backend import NoOpBackend, SequenceBackendProtocol
@@ -15,6 +17,13 @@ from sequencer_gui.domain.model import SequenceModel
 
 # Tab index -1 is the read-only "Complete" view (all blocks concatenated).
 COMPLETE_TAB_INDEX = -1
+
+
+class ScanParameter(NamedTuple):
+    """One scanned axis: host id / label and a comma-separated list of values (parsed when scan runs)."""
+
+    name: str
+    values_text: str
 
 
 def _remap_tab_after_block_move(active: int, from_i: int, to_i: int) -> int:
@@ -42,6 +51,8 @@ class SequenceAppState(QObject):
     row_labels_changed = pyqtSignal()
     sequence_name_changed = pyqtSignal(str)
     run_sequence_changed = pyqtSignal(bool)
+    scan_repetitions_changed = pyqtSignal(int)
+    scan_parameters_changed = pyqtSignal()
     document_changed = pyqtSignal(SequenceDocument)
     active_tab_changed = pyqtSignal(int)
 
@@ -63,6 +74,8 @@ class SequenceAppState(QObject):
         self._active_tab = 0
         self._sequence_name = sequence_name
         self._run_sequence = True
+        self._scan_repetitions = 1
+        self._scan_parameters: tuple[ScanParameter, ...] = ()
         self._notify_backend()
 
     def _notify_backend(self) -> None:
@@ -97,6 +110,55 @@ class SequenceAppState(QObject):
     def run_sequence(self) -> bool:
         """If False, the host should not run the sequence (pushed to the in-process HERO only; not saved in files)."""
         return self._run_sequence
+
+    @property
+    def scan_repetitions(self) -> int:
+        """Shots per scan step (UI only until scan execution exists)."""
+        return self._scan_repetitions
+
+    def set_scan_repetitions(self, n: int) -> None:
+        if n < 1:
+            n = 1
+        if self._scan_repetitions == n:
+            return
+        self._scan_repetitions = n
+        self.scan_repetitions_changed.emit(n)
+
+    @property
+    def scan_parameters(self) -> tuple[ScanParameter, ...]:
+        return self._scan_parameters
+
+    def add_scan_parameter(self) -> None:
+        self._scan_parameters = self._scan_parameters + (ScanParameter("", ""),)
+        self.scan_parameters_changed.emit()
+
+    def remove_scan_parameter(self, index: int) -> None:
+        n = len(self._scan_parameters)
+        if not (0 <= index < n):
+            return
+        self._scan_parameters = tuple(p for i, p in enumerate(self._scan_parameters) if i != index)
+        self.scan_parameters_changed.emit()
+
+    def set_scan_parameter_name(self, index: int, name: str) -> None:
+        if not (0 <= index < len(self._scan_parameters)):
+            return
+        p = self._scan_parameters[index]
+        if p.name == name:
+            return
+        self._scan_parameters = tuple(
+            q if i != index else q._replace(name=name) for i, q in enumerate(self._scan_parameters)
+        )
+
+    def set_scan_parameter_values_text(self, index: int, values_text: str) -> None:
+        if not (0 <= index < len(self._scan_parameters)):
+            return
+        p = self._scan_parameters[index]
+        if p.values_text == values_text:
+            return
+        self._scan_parameters = tuple(
+            q if i != index else q._replace(values_text=values_text)
+            for i, q in enumerate(self._scan_parameters)
+        )
 
     def set_run_sequence(self, on: bool) -> None:
         if self._run_sequence == on:

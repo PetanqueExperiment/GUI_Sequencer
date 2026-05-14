@@ -22,7 +22,7 @@ class AomObject:
                 default=HOLD_SIGNAL,
                 minimum=0.0,
                 maximum=1.0,
-                decimals=2,
+                decimals=3,
                 single_step=0.0001,
             ),
             AnalogParameterSpec(
