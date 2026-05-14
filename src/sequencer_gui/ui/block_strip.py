@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -149,7 +150,7 @@ class BlockStripWidget(QGroupBox):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(56)
+        scroll.setMinimumHeight(80)
         scroll.setWidget(self._canvas)
 
         self._btn_add = QPushButton("Add block")
@@ -185,17 +186,19 @@ class BlockStripWidget(QGroupBox):
             frame = QFrame()
             frame.setFrameShape(QFrame.StyledPanel)
             frames.append(frame)
-            fl = QHBoxLayout(frame)
-            fl.setContentsMargins(8, 4, 8, 4)
-            fl.setSpacing(6)
+            outer = QVBoxLayout(frame)
+            outer.setContentsMargins(8, 4, 8, 4)
+            outer.setSpacing(4)
+
+            row_name = QHBoxLayout()
+            row_name.setSpacing(6)
 
             handle = _DragHandle(i, self._canvas)
-            fl.addWidget(handle)
+            row_name.addWidget(handle)
 
-            fl.addWidget(QLabel("Name:"))
             edit = QLineEdit(b.name)
             edit.setMinimumWidth(100)
-            edit.setMaximumWidth(200)
+            edit.setMaximumWidth(100)
             idx = i
 
             def make_finished(ii: int, e: QLineEdit):
@@ -205,7 +208,12 @@ class BlockStripWidget(QGroupBox):
                 return on_finished
 
             edit.editingFinished.connect(make_finished(idx, edit))
-            fl.addWidget(edit)
+            row_name.addWidget(edit)
+            row_name.addStretch(1)
+            outer.addLayout(row_name)
+
+            row_actions = QHBoxLayout()
+            row_actions.setSpacing(6)
 
             on_btn = QPushButton("On")
             on_btn.setCheckable(True)
@@ -223,7 +231,7 @@ class BlockStripWidget(QGroupBox):
             on_btn.setChecked(b.enabled)
             on_btn.blockSignals(False)
             on_btn.setText("On" if b.enabled else "Off")
-            fl.addWidget(on_btn)
+            row_actions.addWidget(on_btn)
 
             btn_remove = QPushButton("Remove")
             btn_remove.setEnabled(len(doc.blocks) > 1)
@@ -235,7 +243,9 @@ class BlockStripWidget(QGroupBox):
                 return on_remove
 
             btn_remove.clicked.connect(make_remove(idx))
-            fl.addWidget(btn_remove)
+            row_actions.addWidget(btn_remove)
+            row_actions.addStretch(1)
+            outer.addLayout(row_actions)
 
             row.addWidget(frame)
 
