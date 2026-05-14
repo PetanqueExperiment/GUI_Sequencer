@@ -12,6 +12,16 @@ from sequencer_gui.ui.scan_panel import ScanPanel
 from sequencer_gui.ui.sequence_toolbar import SequenceToolbar
 
 
+class _SequencerViewport(QScrollArea):
+    """Horizontal scroll for a wide timeline; vertical space is delegated to the matrix body."""
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        w = self.widget()
+        if w is not None:
+            w.setFixedHeight(self.viewport().height())
+
+
 class MainWindow(QMainWindow):
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -46,11 +56,11 @@ class MainWindow(QMainWindow):
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_bar, 0)
 
-        self._matrix_scroll = QScrollArea()
+        self._matrix_scroll = _SequencerViewport()
         self._matrix_scroll.setFrameShape(QFrame.NoFrame)
         self._matrix_scroll.setWidgetResizable(False)
         self._matrix_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._matrix_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._matrix_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._matrix_scroll.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self._matrix = ChannelMatrix(state)
         self._matrix_scroll.setWidget(self._matrix)
@@ -129,6 +139,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         self._matrix_scroll.horizontalScrollBar().setValue(0)
+        self._matrix.reset_horizontal_scroll()
         n = len(self._state.document.blocks)
         if index == n:
             self._state.set_active_tab(COMPLETE_TAB_INDEX)
