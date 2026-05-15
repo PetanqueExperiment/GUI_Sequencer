@@ -33,6 +33,10 @@ class _UnknownObject:
     display_name: str
 
     @property
+    def has_on_off(self) -> bool:
+        return True
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         return ()
 

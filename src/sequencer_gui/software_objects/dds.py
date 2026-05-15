@@ -13,6 +13,10 @@ class DdsObject:
     display_name: str = "DDS"
 
     @property
+    def has_on_off(self) -> bool:
+        return False
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         return (
             AnalogParameterSpec(

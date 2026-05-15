@@ -69,7 +69,11 @@ def _device_rows_from_block(
     """``device_rows["<row>"] = { "states": [...], "frequency": [...], ... }`` (analog params as sibling keys)."""
     out: dict[str, dict[str, Any]] = {}
     for r in range(rows):
-        state_list = [bool(block.channels.get((r, c), True)) for c in range(block.cols)]
+        obj = get_object(row_software[r])
+        if obj.has_on_off:
+            state_list = [bool(block.channels.get((r, c), True)) for c in range(block.cols)]
+        else:
+            state_list = [True] * block.cols
         an = _analog_param_lists_for_row(block.analog, r, block.cols, row_software)
         row: dict[str, Any] = {"states": state_list}
         row.update(an)

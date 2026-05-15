@@ -13,5 +13,9 @@ class ShutterObject:
     display_name: str = "Shutter"
 
     @property
+    def has_on_off(self) -> bool:
+        return True
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         return ()

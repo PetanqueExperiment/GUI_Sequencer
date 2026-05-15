@@ -50,6 +50,9 @@ class SequenceModel:
         return self.row_software[row]
 
     def channel(self, row: int, col: int) -> bool:
+        obj = get_object(self.row_software_name(row))
+        if not obj.has_on_off:
+            return True
         return self.channels.get((row, col), False)
 
     def _default_analog_for_param(self, row: int, param_id: str) -> float:
@@ -112,10 +115,14 @@ class SequenceModel:
             r, pid, _c = key
             if r == row and pid not in valid_ids:
                 del a[key]
+        ch = dict(self.channels)
+        if not obj.has_on_off:
+            for c in range(self.cols):
+                ch.pop((row, c), None)
         return SequenceModel(
             rows=self.rows,
             cols=self.cols,
-            channels=dict(self.channels),
+            channels=ch,
             delays_us=dict(self.delays_us),
             analog=a,
             row_labels=self.row_labels,

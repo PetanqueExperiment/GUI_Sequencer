@@ -11,11 +11,13 @@ from sequencer_gui.domain.document import (
     block_to_sequence_model,
     document_from_single_model,
     merge_blocks,
+    merged_enabled_timeline_col_to_block,
 )
 from sequencer_gui.domain.analog_stored import AnalogStored
 from sequencer_gui.domain.model import SequenceModel
+from sequencer_gui.software_objects import get_object
 
-# Tab index -1 is the read-only "Complete" view (all blocks concatenated).
+# Tab index -1 is the "Complete" view (enabled blocks concatenated); editable like per-block tabs.
 COMPLETE_TAB_INDEX = -1
 
 
@@ -93,13 +95,15 @@ class SequenceAppState(QObject):
 
     @property
     def timeline_read_only(self) -> bool:
-        return self._active_tab == COMPLETE_TAB_INDEX
+        if self._active_tab != COMPLETE_TAB_INDEX:
+            return False
+        return not any(b.enabled for b in self._document.blocks)
 
     @property
     def model(self) -> SequenceModel:
-        """View model for the current tab: one block or merged preview."""
+        """View model for the current tab: one block or merged preview (enabled blocks only)."""
         if self._active_tab == COMPLETE_TAB_INDEX:
-            return merge_blocks(self._document, enabled_only=False)
+            return merge_blocks(self._document, enabled_only=True)
         return block_to_sequence_model(self._document, self._active_tab)
 
     @property
@@ -205,12 +209,21 @@ class SequenceAppState(QObject):
         self.model_changed.emit(self.model)
         self._notify_backend()
 
-    def set_channel(self, row: int, col: int, on: bool) -> None:
+    def _timeline_col_to_block(self, col: int) -> tuple[int, int] | None:
+        """Map UI timeline column to (block_index, col_in_block); None if the edit does not apply."""
         if self._active_tab == COMPLETE_TAB_INDEX:
+            return merged_enabled_timeline_col_to_block(self._document, col)
+        return (self._active_tab, col)
+
+    def set_channel(self, row: int, col: int, on: bool) -> None:
+        if not get_object(self._document.row_software[row]).has_on_off:
             return
-        bi = self._active_tab
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
+            return
+        bi, local_col = resolved
         block = self._document.blocks[bi]
-        new_b = block.with_channel(self._document.rows, row, col, on)
+        new_b = block.with_channel(self._document.rows, row, local_col, on)
         self._commit_document(self._document.with_block(bi, new_b))
         self.channels_changed.emit()
 
@@ -221,20 +234,22 @@ class SequenceAppState(QObject):
         self.channels_changed.emit()
 
     def set_delay_us(self, col: int, value_us: float) -> None:
-        if self._active_tab == COMPLETE_TAB_INDEX:
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
             return
-        bi = self._active_tab
+        bi, local_col = resolved
         block = self._document.blocks[bi]
-        new_b = block.with_delay_us(col, value_us)
+        new_b = block.with_delay_us(local_col, value_us)
         self._commit_document(self._document.with_block(bi, new_b))
         self.delays_changed.emit()
 
     def set_analog(self, row: int, param_id: str, col: int, value: AnalogStored) -> None:
-        if self._active_tab == COMPLETE_TAB_INDEX:
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
             return
-        bi = self._active_tab
+        bi, local_col = resolved
         block = self._document.blocks[bi]
-        new_b = block.with_analog(self._document.rows, row, param_id, col, value)
+        new_b = block.with_analog(self._document.rows, row, param_id, local_col, value)
         self._commit_document(self._document.with_block(bi, new_b))
         self.analog_changed.emit()
 

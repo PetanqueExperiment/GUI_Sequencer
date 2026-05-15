@@ -13,5 +13,9 @@ class TtlObject:
     display_name: str = "TTL"
 
     @property
+    def has_on_off(self) -> bool:
+        return True
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         return ()

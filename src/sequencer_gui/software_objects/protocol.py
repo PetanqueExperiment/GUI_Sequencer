@@ -10,5 +10,10 @@ class SoftwareObject(Protocol):
     display_name: str
 
     @property
+    def has_on_off(self) -> bool:
+        """Per time-step digital on/off (channel strip). False for devices that are analog-only."""
+        ...
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         ...

@@ -186,12 +186,16 @@ class SequenceDocument:
                 r, pid, _c = key
                 if r == row and pid not in valid_ids:
                     del a[key]
+            ch = dict(b.channels)
+            if not obj.has_on_off:
+                for c in range(b.cols):
+                    ch.pop((row, c), None)
             new_blocks.append(
                 SequenceBlock(
                     name=b.name,
                     enabled=b.enabled,
                     cols=b.cols,
-                    channels=dict(b.channels),
+                    channels=ch,
                     delays_us=dict(b.delays_us),
                     analog=a,
                 )
@@ -258,6 +262,23 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
         row_labels=doc.row_labels,
         row_software=doc.row_software,
     )
+
+
+def merged_enabled_timeline_col_to_block(doc: SequenceDocument, merged_col: int) -> Tuple[int, int] | None:
+    """Map a column in ``merge_blocks(doc, enabled_only=True)`` to ``(block_index, col_in_block)``.
+
+    Returns ``None`` when ``merged_col`` is out of range or no blocks are enabled (placeholder column).
+    """
+    if merged_col < 0:
+        return None
+    col_off = 0
+    for bi, b in enumerate(doc.blocks):
+        if not b.enabled:
+            continue
+        if merged_col < col_off + b.cols:
+            return (bi, merged_col - col_off)
+        col_off += b.cols
+    return None
 
 
 def document_from_single_model(model: SequenceModel, block_name: str = "Block 1") -> SequenceDocument:

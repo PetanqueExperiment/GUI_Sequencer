@@ -14,6 +14,10 @@ class CurrentSourceObject:
     display_name: str = "Current Source"
 
     @property
+    def has_on_off(self) -> bool:
+        return False
+
+    @property
     def analog_parameters(self) -> tuple[AnalogParameterSpec, ...]:
         return (
             AnalogParameterSpec(

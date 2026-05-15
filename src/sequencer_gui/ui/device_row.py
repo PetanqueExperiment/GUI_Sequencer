@@ -32,7 +32,7 @@ _ROW_CHECKED_COLORS = (
     "#17becf",
 )
 
-# One timeline step: delay spin, channel toggle, analog line edit (same width every row).
+# One timeline step: delay spin, optional per-device on/off toggle, analog line edit (same width every row).
 STEP_COLUMN_WIDTH_PX = 72
 # Must match QGridLayout.setHorizontalSpacing on the row grid.
 _GRID_H_SPACING_PX = 4
@@ -93,7 +93,7 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 class DeviceRowWidget(QWidget):
-    """One sequencer row: label + software combo, tall channel toggles, 0..N analog parameter rows."""
+    """One sequencer row: label + software combo, optional on/off strip, 0..N analog parameter rows."""
 
     def __init__(self, row: int, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -135,24 +135,7 @@ class DeviceRowWidget(QWidget):
 
         self._grid.addWidget(header, 0, 0, 2, 1)
 
-        for c in range(m.cols):
-            btn = QPushButton()
-            btn.setCheckable(True)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
-            btn.setStyleSheet(_channel_button_stylesheet(row))
-            btn.setChecked(m.channel(row, c))
-
-            def make_toggle(rr: int, cc: int):
-                def on_toggled(checked: bool) -> None:
-                    self._state.set_channel(rr, cc, checked)
-
-                return on_toggled
-
-            btn.toggled.connect(make_toggle(row, c))
-            self._buttons.append(btn)
-            self._grid.addWidget(btn, 0, c + 1, 2, 1)
+        self._sync_channel_strip(m)
 
         self._rebuild_analog_section()
 
@@ -180,6 +163,49 @@ class DeviceRowWidget(QWidget):
 
     def _on_row_label_finished(self) -> None:
         self._state.set_row_label(self._row, self._edit.text())
+
+    def _clear_channel_buttons(self) -> None:
+        for btn in self._buttons:
+            self._grid.removeWidget(btn)
+            btn.deleteLater()
+        self._buttons.clear()
+
+    def _add_channel_buttons(self, model: SequenceModel) -> None:
+        for c in range(model.cols):
+            btn = QPushButton()
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+            btn.setStyleSheet(_channel_button_stylesheet(self._row))
+            btn.setChecked(model.channel(self._row, c))
+
+            def make_toggle(rr: int, cc: int):
+                def on_toggled(checked: bool) -> None:
+                    self._state.set_channel(rr, cc, checked)
+
+                return on_toggled
+
+            btn.toggled.connect(make_toggle(self._row, c))
+            self._buttons.append(btn)
+            self._grid.addWidget(btn, 0, c + 1, 2, 1)
+
+    def _sync_channel_buttons_from_model(self, model: SequenceModel) -> None:
+        for c in range(min(model.cols, len(self._buttons))):
+            btn = self._buttons[c]
+            btn.blockSignals(True)
+            btn.setChecked(model.channel(self._row, c))
+            btn.blockSignals(False)
+
+    def _sync_channel_strip(self, model: SequenceModel) -> None:
+        want = get_object(model.row_software_name(self._row)).has_on_off
+        have = len(self._buttons) > 0
+        if want != have:
+            self._clear_channel_buttons()
+            if want:
+                self._add_channel_buttons(model)
+        elif want:
+            self._sync_channel_buttons_from_model(model)
 
     def _param_signature(self, model: SequenceModel) -> tuple[str, ...]:
         obj = get_object(model.row_software_name(self._row))
@@ -265,6 +291,7 @@ class DeviceRowWidget(QWidget):
             self._edit.setText(t)
             self._edit.blockSignals(False)
         self._sw.apply_from_model(model)
+        self._sync_channel_strip(model)
         sig = self._param_signature(model)
         if sig != self._param_sig:
             self._rebuild_analog_section()
@@ -277,9 +304,4 @@ class DeviceRowWidget(QWidget):
                     ed = self._analog_edits[pi][c]
                     txt = model.analog_display_text(self._row, spec.param_id, c, decimals=spec.decimals)
                     ed.set_committed_display(txt)
-        for c in range(min(model.cols, len(self._buttons))):
-            btn = self._buttons[c]
-            btn.blockSignals(True)
-            btn.setChecked(model.channel(self._row, c))
-            btn.blockSignals(False)
         self.set_timeline_read_only(self._state.timeline_read_only)
