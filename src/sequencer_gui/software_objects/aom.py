@@ -29,13 +29,4 @@ class AomObject:
                 decimals=3,
                 single_step=0.0001,
             ),
-            AnalogParameterSpec(
-                param_id="frequency",
-                label="Frequency (MHz)",
-                default=HOLD_SIGNAL,
-                minimum=0.0,
-                maximum=500.0,
-                decimals=1,
-                single_step=0.001,
-            ),
         )
