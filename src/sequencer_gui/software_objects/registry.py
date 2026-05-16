@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sequencer_gui.software_objects.RF_source import RF_SOURCE_ID, RfSourceObject
 from sequencer_gui.software_objects.aom import AOM_ID, AomObject
 from sequencer_gui.software_objects.current_source import (
     CURRENT_SOURCE_ID,
@@ -49,6 +50,7 @@ def get_object(object_id: str) -> SoftwareObject:
 
 CATALOG_ORDER: tuple[str, ...] = (
     AOM_ID,
+    RF_SOURCE_ID,
     SHUTTER_ID,
     TTL_ID,
     DDS_ID,
@@ -58,6 +60,7 @@ CATALOG_ORDER: tuple[str, ...] = (
 
 def _build_registry() -> None:
     register(AomObject())
+    register(RfSourceObject())
     register(ShutterObject())
     register(TtlObject())
     register(DdsObject())
