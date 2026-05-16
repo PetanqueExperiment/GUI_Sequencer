@@ -38,11 +38,16 @@ STEP_COLUMN_WIDTH_PX = 72
 _GRID_H_SPACING_PX = 4
 
 
-def timeline_content_width_px(cols: int) -> int:
-    """Exact width of the timeline grid (label column + steps + inter-column spacing)."""
+def timeline_steps_width_px(cols: int) -> int:
+    """Width of the scrollable step columns only."""
     if cols < 1:
         cols = 1
-    return LABEL_COL_MIN_WIDTH_PX + cols * (STEP_COLUMN_WIDTH_PX + _GRID_H_SPACING_PX)
+    return cols * STEP_COLUMN_WIDTH_PX + max(0, cols - 1) * _GRID_H_SPACING_PX
+
+
+def timeline_content_width_px(cols: int) -> int:
+    """Full row width (label column + gap + step columns)."""
+    return LABEL_COL_MIN_WIDTH_PX + _GRID_H_SPACING_PX + timeline_steps_width_px(cols)
 
 
 def _channel_button_stylesheet(row_index: int) -> str:
@@ -92,11 +97,16 @@ def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-class DeviceRowWidget(QWidget):
-    """One sequencer row: label + software combo, optional on/off strip, 0..N analog parameter rows."""
+class DeviceRowWidget:
+    """One sequencer row split into a fixed label panel and a scrollable steps panel."""
 
-    def __init__(self, row: int, state: SequenceAppState, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+    def __init__(
+        self,
+        row: int,
+        state: SequenceAppState,
+        model: SequenceModel,
+        parent: QWidget | None = None,
+    ) -> None:
         self._row = row
         self._state = state
         self._buttons: list[QPushButton] = []
@@ -104,16 +114,24 @@ class DeviceRowWidget(QWidget):
         self._param_sig: tuple[str, ...] = ()
         self._analog_row_widgets: list[QWidget] = []
 
-        m = state.model
-        self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
-        self._grid.setVerticalSpacing(4)
-        self._grid.setColumnMinimumWidth(0, LABEL_COL_MIN_WIDTH_PX)
-        for col in range(1, m.cols + 1):
-            self._grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
-            self._grid.setColumnStretch(col, 0)
-        self._grid.setColumnStretch(0, 0)
+        self._label_panel = QWidget(parent)
+        self._steps_panel = QWidget(parent)
+        self._label_grid = QGridLayout(self._label_panel)
+        self._steps_grid = QGridLayout(self._steps_panel)
+        for grid in (self._label_grid, self._steps_grid):
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
+            grid.setVerticalSpacing(4)
+
+        m = model
+        self._label_panel.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+        self._label_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        self._steps_panel.setFixedWidth(timeline_steps_width_px(m.cols))
+        self._steps_panel.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+
+        for col in range(m.cols):
+            self._steps_grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
+            self._steps_grid.setColumnStretch(col, 0)
 
         header = QWidget()
         header.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
@@ -133,16 +151,29 @@ class DeviceRowWidget(QWidget):
         self._sw.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
         hlay.addWidget(self._sw)
 
-        self._grid.addWidget(header, 0, 0, 2, 1)
+        self._label_grid.addWidget(header, 0, 0, 2, 1)
 
         self._sync_channel_strip(m)
 
         self._rebuild_analog_section()
 
-        self.setFixedWidth(timeline_content_width_px(m.cols))
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-
+        self.sync_panel_heights()
         self.set_timeline_read_only(state.timeline_read_only)
+
+    def label_panel(self) -> QWidget:
+        return self._label_panel
+
+    def steps_panel(self) -> QWidget:
+        return self._steps_panel
+
+    def set_steps_width(self, steps_w: int) -> None:
+        self._steps_panel.setFixedWidth(steps_w)
+
+    def sync_panel_heights(self) -> None:
+        h = max(self._label_panel.sizeHint().height(), self._steps_panel.sizeHint().height())
+        if h > 0:
+            self._label_panel.setMinimumHeight(h)
+            self._steps_panel.setMinimumHeight(h)
 
     def set_timeline_read_only(self, read_only: bool) -> None:
         for btn in self._buttons:
@@ -166,7 +197,7 @@ class DeviceRowWidget(QWidget):
 
     def _clear_channel_buttons(self) -> None:
         for btn in self._buttons:
-            self._grid.removeWidget(btn)
+            self._steps_grid.removeWidget(btn)
             btn.deleteLater()
         self._buttons.clear()
 
@@ -188,7 +219,7 @@ class DeviceRowWidget(QWidget):
 
             btn.toggled.connect(make_toggle(self._row, c))
             self._buttons.append(btn)
-            self._grid.addWidget(btn, 0, c + 1, 2, 1)
+            self._steps_grid.addWidget(btn, 0, c, 2, 1)
 
     def _sync_channel_buttons_from_model(self, model: SequenceModel) -> None:
         for c in range(min(model.cols, len(self._buttons))):
@@ -206,6 +237,7 @@ class DeviceRowWidget(QWidget):
                 self._add_channel_buttons(model)
         elif want:
             self._sync_channel_buttons_from_model(model)
+        self.sync_panel_heights()
 
     def _param_signature(self, model: SequenceModel) -> tuple[str, ...]:
         obj = get_object(model.row_software_name(self._row))
@@ -213,7 +245,10 @@ class DeviceRowWidget(QWidget):
 
     def _clear_analog_section(self) -> None:
         for w in self._analog_row_widgets:
-            self._grid.removeWidget(w)
+            if isinstance(w, QLabel):
+                self._label_grid.removeWidget(w)
+            else:
+                self._steps_grid.removeWidget(w)
             w.deleteLater()
         self._analog_row_widgets.clear()
         self._analog_edits = []
@@ -259,7 +294,7 @@ class DeviceRowWidget(QWidget):
             lab.setWordWrap(False)
             lab.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
             lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self._grid.addWidget(lab, g_row, 0)
+            self._label_grid.addWidget(lab, g_row, 0)
             self._analog_row_widgets.append(lab)
 
             edits_row: list[AnalogValueLineEdit] = []
@@ -276,10 +311,11 @@ class DeviceRowWidget(QWidget):
 
                 ed.set_on_return(make_return(ed, spec, c))
                 ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-                self._grid.addWidget(ed, g_row, c + 1)
+                self._steps_grid.addWidget(ed, g_row, c)
                 edits_row.append(ed)
                 self._analog_row_widgets.append(ed)
             self._analog_edits.append(edits_row)
+        self.sync_panel_heights()
         self.set_timeline_read_only(self._state.timeline_read_only)
 
     def sync_from_model(self, model: SequenceModel) -> None:

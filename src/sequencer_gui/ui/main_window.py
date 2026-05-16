@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt5.QtCore import QByteArray, Qt
 from PyQt5.QtGui import QCloseEvent, QGuiApplication, QShowEvent
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QMainWindow, QScrollArea, QTabBar, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabBar, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
 from sequencer_gui.persistence import load_window_geometry, save_row_labels, save_window_geometry
@@ -10,16 +10,6 @@ from sequencer_gui.ui.block_strip import BlockStripWidget
 from sequencer_gui.ui.channel_matrix import ChannelMatrix
 from sequencer_gui.ui.scan_panel import ScanPanel
 from sequencer_gui.ui.sequence_toolbar import SequenceToolbar
-
-
-class _SequencerViewport(QScrollArea):
-    """Horizontal scroll for a wide timeline; vertical space is delegated to the matrix body."""
-
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        super().resizeEvent(event)
-        w = self.widget()
-        if w is not None:
-            w.setFixedHeight(self.viewport().height())
 
 
 class MainWindow(QMainWindow):
@@ -56,15 +46,8 @@ class MainWindow(QMainWindow):
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_bar, 0)
 
-        self._matrix_scroll = _SequencerViewport()
-        self._matrix_scroll.setFrameShape(QFrame.NoFrame)
-        self._matrix_scroll.setWidgetResizable(False)
-        self._matrix_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._matrix_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._matrix_scroll.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self._matrix = ChannelMatrix(state)
-        self._matrix_scroll.setWidget(self._matrix)
-        layout.addWidget(self._matrix_scroll, 1)
+        layout.addWidget(self._matrix, 1)
 
         state.document_changed.connect(self._sync_tab_titles)
         state.active_tab_changed.connect(self._sync_tab_selection)
@@ -138,7 +121,6 @@ class MainWindow(QMainWindow):
         self._tab_bar.blockSignals(False)
 
     def _on_tab_changed(self, index: int) -> None:
-        self._matrix_scroll.horizontalScrollBar().setValue(0)
         self._matrix.reset_horizontal_scroll()
         n = len(self._state.document.blocks)
         if index == n:
