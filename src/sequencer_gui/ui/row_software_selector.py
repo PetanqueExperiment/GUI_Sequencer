@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PyQt5.QtGui import QWheelEvent
 from PyQt5.QtWidgets import QComboBox, QSizePolicy, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import SequenceAppState
@@ -10,6 +11,11 @@ from sequencer_gui.software_objects import get_object, iter_objects
 LABEL_COL_MIN_WIDTH_PX = 160
 
 _COMBO_H = 25
+
+
+class _NoWheelComboBox(QComboBox):
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        event.ignore()
 
 
 class RowSoftwareSelector(QWidget):
@@ -24,7 +30,7 @@ class RowSoftwareSelector(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._combo = QComboBox()
+        self._combo = _NoWheelComboBox()
         self._combo.setMinimumHeight(_COMBO_H)
         self._combo.setMaximumHeight(_COMBO_H)
         for obj in iter_objects():

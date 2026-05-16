@@ -67,14 +67,16 @@ def _make_scroll_panel(
     return scroll
 
 
-def _link_scroll_bar(master: QScrollBar, slave: QScrollBar) -> None:
-    """Mirror master scrollbar position onto slave (one-way)."""
+def _link_scroll_bars(*bars: QScrollBar) -> None:
+    """Keep scroll bar positions in sync (bidirectional, loop-safe)."""
 
-    def on_master(value: int) -> None:
-        if slave.value() != value:
-            slave.setValue(value)
+    def on_changed(source: QScrollBar, value: int) -> None:
+        for bar in bars:
+            if bar is not source and bar.value() != value:
+                bar.setValue(value)
 
-    master.valueChanged.connect(on_master)
+    for bar in bars:
+        bar.valueChanged.connect(lambda value, b=bar: on_changed(b, value))
 
 
 class _TimelinePanel(QScrollArea):
@@ -208,7 +210,7 @@ class ChannelMatrix(QGroupBox):
 
         h_matrix.valueChanged.connect(on_matrix_h)
         h_matrix.rangeChanged.connect(on_h_range_changed)
-        _link_scroll_bar(v_matrix, v_labels)
+        _link_scroll_bars(v_matrix, v_labels)
 
     def _layout_panel_heights(self) -> None:
         if (
