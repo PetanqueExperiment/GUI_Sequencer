@@ -22,9 +22,11 @@ COMPLETE_TAB_INDEX = -1
 
 
 class ScanParameter(NamedTuple):
-    """One scanned axis: host id / label and a comma-separated list of values (parsed when scan runs)."""
+    """One scanned axis: device row label, analog param id, timestep label, and scan values (parsed when scan runs)."""
 
-    name: str
+    device_label: str
+    param_id: str
+    timestep_label: str
     values_text: str
 
 
@@ -146,7 +148,7 @@ class SequenceAppState(QObject):
         return self._scan_parameters
 
     def add_scan_parameter(self) -> None:
-        self._scan_parameters = self._scan_parameters + (ScanParameter("", ""),)
+        self._scan_parameters = self._scan_parameters + (ScanParameter("", "", "", ""),)
         self.scan_parameters_changed.emit()
 
     def remove_scan_parameter(self, index: int) -> None:
@@ -156,14 +158,37 @@ class SequenceAppState(QObject):
         self._scan_parameters = tuple(p for i, p in enumerate(self._scan_parameters) if i != index)
         self.scan_parameters_changed.emit()
 
-    def set_scan_parameter_name(self, index: int, name: str) -> None:
+    def set_scan_parameter_device_label(self, index: int, device_label: str) -> None:
         if not (0 <= index < len(self._scan_parameters)):
             return
         p = self._scan_parameters[index]
-        if p.name == name:
+        if p.device_label == device_label:
             return
         self._scan_parameters = tuple(
-            q if i != index else q._replace(name=name) for i, q in enumerate(self._scan_parameters)
+            q if i != index else q._replace(device_label=device_label)
+            for i, q in enumerate(self._scan_parameters)
+        )
+
+    def set_scan_parameter_param_id(self, index: int, param_id: str) -> None:
+        if not (0 <= index < len(self._scan_parameters)):
+            return
+        p = self._scan_parameters[index]
+        if p.param_id == param_id:
+            return
+        self._scan_parameters = tuple(
+            q if i != index else q._replace(param_id=param_id)
+            for i, q in enumerate(self._scan_parameters)
+        )
+
+    def set_scan_parameter_timestep_label(self, index: int, timestep_label: str) -> None:
+        if not (0 <= index < len(self._scan_parameters)):
+            return
+        p = self._scan_parameters[index]
+        if p.timestep_label == timestep_label:
+            return
+        self._scan_parameters = tuple(
+            q if i != index else q._replace(timestep_label=timestep_label)
+            for i, q in enumerate(self._scan_parameters)
         )
 
     def set_scan_parameter_values_text(self, index: int, values_text: str) -> None:

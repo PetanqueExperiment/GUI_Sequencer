@@ -3,11 +3,11 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -91,6 +91,7 @@ def _channel_button_stylesheet(row_index: int) -> str:
 
 
 _HEADER_COL_SPACING_PX = 4
+_DEVICE_INDEX_WIDTH_PX = 24
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -136,20 +137,25 @@ class DeviceRowWidget:
         header = QWidget()
         header.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
         header.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-        hlay = QVBoxLayout(header)
+        hlay = QHBoxLayout(header)
         hlay.setContentsMargins(0, 0, 0, 0)
         hlay.setSpacing(_HEADER_COL_SPACING_PX)
 
+        index_lab = QLabel(str(row))
+        index_lab.setAlignment(Qt.AlignCenter)
+        index_lab.setFixedWidth(_DEVICE_INDEX_WIDTH_PX)
+        index_lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        index_lab.setStyleSheet("color: #78909c; font-size: 11px;")
+        hlay.addWidget(index_lab)
+
         self._edit = QLineEdit(m.row_label(row))
-        self._edit.setMinimumWidth(40)
-        self._edit.setMaximumWidth(120)
+        self._edit.setMinimumWidth(36)
         self._edit.editingFinished.connect(self._on_row_label_finished)
-        self._edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        hlay.addWidget(self._edit)
+        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        hlay.addWidget(self._edit, 1)
 
         self._sw = RowSoftwareSelector(row, state)
-        self._sw.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
-        hlay.addWidget(self._sw)
+        hlay.addWidget(self._sw, 1)
 
         self._label_grid.addWidget(header, 0, 0, 2, 1)
 

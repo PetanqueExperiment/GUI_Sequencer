@@ -32,6 +32,7 @@ _STEP_GROUP_GAP_PX = 10
 _GRID_H_SPACING_PX = 4
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
 # Fallback when layout has not resolved line-edit height yet.
+_INDEX_ROW_MIN_HEIGHT_PX = 20
 _LABEL_ROW_MIN_HEIGHT_PX = 24
 _TIME_ROW_MIN_HEIGHT_PX = 28
 
@@ -42,6 +43,16 @@ _DELAY_DECIMALS = 3
 
 def _format_delay_us(v: float) -> str:
     return format(v, f".{_DELAY_DECIMALS}f")
+
+
+def _make_timestep_index_label(col: int) -> QLabel:
+    lab = QLabel(str(col))
+    lab.setAlignment(Qt.AlignCenter)
+    lab.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+    lab.setFixedHeight(_INDEX_ROW_MIN_HEIGHT_PX)
+    lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    lab.setStyleSheet("color: #78909c; font-size: 11px;")
+    return lab
 
 
 def min_width_for_timeline_cols(_cols: int) -> int:
@@ -350,6 +361,8 @@ class ChannelMatrix(QGroupBox):
             ts_grid.setColumnStretch(col, 0)
 
         for c in range(model.cols):
+            ts_grid.addWidget(_make_timestep_index_label(c), 0, c)
+
             label_ed = QLineEdit(model.col_label(c))
             label_ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
             label_ed.setPlaceholderText("...")
@@ -358,7 +371,7 @@ class ChannelMatrix(QGroupBox):
             )
             self._col_label_edits.append(label_ed)
             label_ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            ts_grid.addWidget(label_ed, 0, c)
+            ts_grid.addWidget(label_ed, 1, c)
 
             ed = CommitFloatLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
             ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
@@ -373,19 +386,21 @@ class ChannelMatrix(QGroupBox):
             ed.set_on_return(make_return(c))
             self._delay_edits.append(ed)
             ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            ts_grid.addWidget(ed, 1, c)
+            ts_grid.addWidget(ed, 2, c)
 
         steps_time_gap = QWidget()
         steps_time_gap.setFixedHeight(_TIME_AFTER_GAP_PX)
         steps_time_gap.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        ts_grid.addWidget(steps_time_gap, 2, 0, 1, model.cols)
+        ts_grid.addWidget(steps_time_gap, 3, 0, 1, model.cols)
 
         self._time_steps.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._time_steps.adjustSize()
         steps_w = max(timeline_steps_width_px(model.cols), self._time_steps.sizeHint().width())
         time_h = max(
             self._time_steps.sizeHint().height(),
-            _LABEL_ROW_MIN_HEIGHT_PX
+            _INDEX_ROW_MIN_HEIGHT_PX
+            + _PAIR_V_SPACING_PX
+            + _LABEL_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
             + _TIME_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
@@ -408,6 +423,13 @@ class ChannelMatrix(QGroupBox):
         corner_lay = QVBoxLayout(self._corner_block)
         corner_lay.setContentsMargins(0, 0, 0, 0)
         corner_lay.setSpacing(_PAIR_V_SPACING_PX)
+        corner_index = QLabel("#")
+        corner_index.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+        corner_index.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+        corner_index.setFixedHeight(_INDEX_ROW_MIN_HEIGHT_PX)
+        corner_index.setStyleSheet("color: #78909c; font-size: 11px;")
+        corner_index.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        corner_lay.addWidget(corner_index)
         corner_timestep = QLabel("Timestep label")
         corner_timestep.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         corner_timestep.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)

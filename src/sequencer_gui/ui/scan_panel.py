@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QStringListModel
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
+    QCompleter,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -16,6 +17,8 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import ScanParameter, SequenceAppState
+from sequencer_gui.software_objects import get_object
+from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
 
 class ScanPanel(QGroupBox):
@@ -79,6 +82,7 @@ class ScanPanel(QGroupBox):
         state.scan_label_changed.connect(self._sync_label_from_state)
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
+        state.row_labels_changed.connect(self._rebuild_param_cards)
         self._rebuild_param_cards()
 
     def _sync_label_from_state(self, value: str) -> None:
@@ -93,6 +97,14 @@ class ScanPanel(QGroupBox):
         self._repetitions.blockSignals(True)
         self._repetitions.setText(str(value))
         self._repetitions.blockSignals(False)
+
+    def _on_scan_param_combo_changed(self, index: int, combo: _NoWheelComboBox) -> None:
+        if combo.currentIndex() < 0:
+            return
+        param_id = combo.currentData()
+        if param_id is None:
+            return
+        self._state.set_scan_parameter_param_id(index, str(param_id))
 
     def _on_repetitions_edited(self) -> None:
         text = self._repetitions.text().strip()
@@ -123,22 +135,100 @@ class ScanPanel(QGroupBox):
             self._cards_scroll.setMinimumHeight(0)
         self.updateGeometry()
 
+    def _row_index_for_device_label(self, device_label: str) -> int | None:
+        label = device_label.strip()
+        if not label:
+            return None
+        try:
+            return self._state.document.row_labels.index(label)
+        except ValueError:
+            return None
+
+    def _populate_param_combo(
+        self, combo: _NoWheelComboBox, device_label: str, selected_param_id: str
+    ) -> str:
+        combo.blockSignals(True)
+        combo.clear()
+        row = self._row_index_for_device_label(device_label)
+        param_id = selected_param_id
+        if row is not None:
+            obj = get_object(self._state.document.row_software[row])
+            for spec in obj.analog_parameters:
+                combo.addItem(spec.label, spec.param_id)
+        if combo.count() > 0:
+            idx = combo.findData(param_id) if param_id else -1
+            if idx < 0:
+                idx = 0
+            combo.setCurrentIndex(idx)
+            data = combo.itemData(idx)
+            param_id = str(data) if data is not None else ""
+        else:
+            param_id = ""
+        combo.blockSignals(False)
+        return param_id
+
     def _make_param_card(self, index: int, p: ScanParameter) -> QFrame:
         frame = QFrame()
         frame.setFrameShape(QFrame.StyledPanel)
-        frame.setFixedWidth(152)
+        frame.setFixedWidth(400)
         frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
 
         outer = QVBoxLayout(frame)
         outer.setContentsMargins(8, 6, 8, 6)
         outer.setSpacing(6)
 
-        name_edit = QLineEdit(p.name)
-        name_edit.setPlaceholderText("Parameter name")
-        name_edit.editingFinished.connect(
-            lambda idx=index, e=name_edit: self._state.set_scan_parameter_name(idx, e.text())
+        top = QHBoxLayout()
+        top.setSpacing(6)
+
+        device_edit = QLineEdit(p.device_label)
+        device_edit.setPlaceholderText("Device")
+        device_edit.setToolTip("Row label of the device in the sequence")
+        device_edit.setCompleter(
+            QCompleter(QStringListModel(list(self._state.document.row_labels)), device_edit)
         )
-        outer.addWidget(name_edit)
+        param_combo = _NoWheelComboBox()
+        param_combo.setMinimumWidth(110)
+        param_combo.setToolTip("Analog parameter of the selected device")
+        current_param_id = self._populate_param_combo(param_combo, p.device_label, p.param_id)
+        if current_param_id != p.param_id:
+            self._state.set_scan_parameter_param_id(index, current_param_id)
+
+        def on_device_edited(
+            idx: int = index,
+            dev: QLineEdit = device_edit,
+            combo: _NoWheelComboBox = param_combo,
+        ) -> None:
+            label = dev.text().strip()
+            self._state.set_scan_parameter_device_label(idx, label)
+            new_param_id = self._populate_param_combo(combo, label, self._state.scan_parameters[idx].param_id)
+            if new_param_id != self._state.scan_parameters[idx].param_id:
+                self._state.set_scan_parameter_param_id(idx, new_param_id)
+
+        device_edit.editingFinished.connect(on_device_edited)
+        top.addWidget(device_edit, 1)
+
+        param_combo.currentIndexChanged.connect(
+            lambda _i, idx=index, combo=param_combo: self._on_scan_param_combo_changed(idx, combo)
+        )
+        top.addWidget(param_combo, 0)
+
+        timestep_edit = QLineEdit(p.timestep_label)
+        timestep_edit.setPlaceholderText("Timestep label")
+        timestep_edit.setMinimumWidth(100)
+        timestep_edit.setToolTip("Label of the timestep this parameter drives")
+        timestep_edit.editingFinished.connect(
+            lambda idx=index, e=timestep_edit: self._state.set_scan_parameter_timestep_label(idx, e.text())
+        )
+        top.addWidget(timestep_edit, 0)
+
+        btn_remove = QPushButton("\u00d7")
+        btn_remove.setFixedSize(22, 22)
+        btn_remove.setFlat(True)
+        btn_remove.setToolTip("Remove parameter")
+        btn_remove.clicked.connect(lambda checked=False, idx=index: self._state.remove_scan_parameter(idx))
+        top.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+        outer.addLayout(top)
 
         values_edit = QLineEdit(p.values_text)
         values_edit.setPlaceholderText("e.g. 1, 2, 3")
@@ -147,9 +237,5 @@ class ScanPanel(QGroupBox):
             lambda idx=index, e=values_edit: self._state.set_scan_parameter_values_text(idx, e.text())
         )
         outer.addWidget(values_edit)
-
-        btn_remove = QPushButton("Remove")
-        btn_remove.clicked.connect(lambda checked=False, idx=index: self._state.remove_scan_parameter(idx))
-        outer.addWidget(btn_remove, 0, Qt.AlignLeft)
 
         return frame
