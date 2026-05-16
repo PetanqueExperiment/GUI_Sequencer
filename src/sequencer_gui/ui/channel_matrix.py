@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import QEvent, Qt, QTimer
+from PyQt5.QtGui import QWheelEvent
 from PyQt5.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -51,13 +52,53 @@ def min_width_for_timeline_cols(_cols: int) -> int:
     )
 
 
+def _wheel_delta(event: QWheelEvent) -> int:
+    pd = event.pixelDelta()
+    if pd.y() != 0:
+        return pd.y()
+    if pd.x() != 0:
+        return pd.x()
+    ad = event.angleDelta()
+    if ad.y() != 0:
+        return ad.y()
+    return ad.x()
+
+
+def _shift_wheel_scrolls_horizontal(event: QWheelEvent, bar: QScrollBar) -> bool:
+    if not (event.modifiers() & Qt.ShiftModifier):
+        return False
+    delta = _wheel_delta(event)
+    if delta == 0:
+        return False
+    bar.setValue(bar.value() - delta)
+    return True
+
+
+class _ScrollPanel(QScrollArea):
+    """Scroll area; Shift + wheel scrolls horizontally (own bar or an external one)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._shift_horizontal_bar: QScrollBar | None = None
+
+    def set_shift_horizontal_bar(self, bar: QScrollBar | None) -> None:
+        self._shift_horizontal_bar = bar
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        bar = self._shift_horizontal_bar or self.horizontalScrollBar()
+        if _shift_wheel_scrolls_horizontal(event, bar):
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
 def _make_scroll_panel(
     content: QWidget,
     *,
     h_policy: Qt.ScrollBarPolicy,
     v_policy: Qt.ScrollBarPolicy,
-) -> QScrollArea:
-    scroll = QScrollArea()
+) -> _ScrollPanel:
+    scroll = _ScrollPanel()
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setWidgetResizable(False)
     scroll.setHorizontalScrollBarPolicy(h_policy)
@@ -84,6 +125,7 @@ class _TimelinePanel(QScrollArea):
 
     def __init__(self, time_steps: QWidget, row_height: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._shift_horizontal_bar: QScrollBar | None = None
         self.setFrameShape(QFrame.NoFrame)
         self.setWidgetResizable(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -93,8 +135,18 @@ class _TimelinePanel(QScrollArea):
         self.setFixedHeight(row_height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
+    def set_shift_horizontal_bar(self, bar: QScrollBar | None) -> None:
+        self._shift_horizontal_bar = bar
+
     def set_scroll_x(self, px: int) -> None:
         self.horizontalScrollBar().setValue(max(0, px))
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        bar = self._shift_horizontal_bar or self.horizontalScrollBar()
+        if _shift_wheel_scrolls_horizontal(event, bar):
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def refresh_range(self, content_w: int) -> None:
         viewport_w = max(self.viewport().width(), 1)
@@ -116,10 +168,10 @@ class ChannelMatrix(QGroupBox):
         self._built_cols = -1
         self._built_tab = -2
         self._corner_block: QWidget | None = None
-        self._labels_panel: QScrollArea | None = None
+        self._labels_panel: _ScrollPanel | None = None
         self._timeline_panel: _TimelinePanel | None = None
         self._time_row_height_px = _TIME_ROW_MIN_HEIGHT_PX
-        self._matrix_panel: QScrollArea | None = None
+        self._matrix_panel: _ScrollPanel | None = None
         self._time_steps: QWidget | None = None
         self._steps_host: QWidget | None = None
         self._steps_content_width_px = 0
@@ -211,6 +263,8 @@ class ChannelMatrix(QGroupBox):
         h_matrix.valueChanged.connect(on_matrix_h)
         h_matrix.rangeChanged.connect(on_h_range_changed)
         _link_scroll_bars(v_matrix, v_labels)
+        self._labels_panel.set_shift_horizontal_bar(h_matrix)
+        self._timeline_panel.set_shift_horizontal_bar(h_matrix)
 
     def _layout_panel_heights(self) -> None:
         if (
