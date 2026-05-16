@@ -24,12 +24,18 @@ class SequenceModel:
     channels: Dict[Tuple[int, int], bool] = field(default_factory=dict)
     delays_us: Dict[int, float] = field(default_factory=dict)
     analog: Dict[Tuple[int, str, int], AnalogStored] = field(default_factory=dict)
+    col_labels: Tuple[str, ...] = field(default_factory=tuple)
     row_labels: Tuple[str, ...] = field(default_factory=tuple)
     row_software: Tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.rows < 1 or self.cols < 1:
             raise ValueError("rows and cols must be positive")
+        if len(self.col_labels) != self.cols:
+            labels = tuple(
+                self.col_labels[c] if c < len(self.col_labels) else "" for c in range(self.cols)
+            )
+            object.__setattr__(self, "col_labels", labels)
         if len(self.row_labels) != self.rows:
             labels = tuple(
                 self.row_labels[i] if i < len(self.row_labels) else str(i + 1)
@@ -42,6 +48,9 @@ class SequenceModel:
                 for i in range(self.rows)
             )
             object.__setattr__(self, "row_software", rs)
+
+    def col_label(self, col: int) -> str:
+        return self.col_labels[col]
 
     def row_label(self, row: int) -> str:
         return self.row_labels[row]
@@ -99,6 +108,7 @@ class SequenceModel:
             channels=new,
             delays_us=dict(self.delays_us),
             analog=dict(self.analog),
+            col_labels=self.col_labels,
             row_labels=self.row_labels,
             row_software=self.row_software,
         )
@@ -125,6 +135,7 @@ class SequenceModel:
             channels=ch,
             delays_us=dict(self.delays_us),
             analog=a,
+            col_labels=self.col_labels,
             row_labels=self.row_labels,
             row_software=tuple(lst),
         )
@@ -140,6 +151,23 @@ class SequenceModel:
             channels=dict(self.channels),
             delays_us=d,
             analog=dict(self.analog),
+            col_labels=self.col_labels,
+            row_labels=self.row_labels,
+            row_software=self.row_software,
+        )
+
+    def with_col_label(self, col: int, text: str) -> SequenceModel:
+        if not (0 <= col < self.cols):
+            raise IndexError("column index out of range")
+        lst = list(self.col_labels)
+        lst[col] = text
+        return SequenceModel(
+            rows=self.rows,
+            cols=self.cols,
+            channels=dict(self.channels),
+            delays_us=dict(self.delays_us),
+            analog=dict(self.analog),
+            col_labels=tuple(lst),
             row_labels=self.row_labels,
             row_software=self.row_software,
         )
@@ -157,6 +185,7 @@ class SequenceModel:
             channels=dict(self.channels),
             delays_us=dict(self.delays_us),
             analog=a,
+            col_labels=self.col_labels,
             row_labels=self.row_labels,
             row_software=self.row_software,
         )
@@ -172,6 +201,7 @@ class SequenceModel:
             channels=dict(self.channels),
             delays_us=dict(self.delays_us),
             analog=dict(self.analog),
+            col_labels=self.col_labels,
             row_labels=tuple(lst),
             row_software=self.row_software,
         )

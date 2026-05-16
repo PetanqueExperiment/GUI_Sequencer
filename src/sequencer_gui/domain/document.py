@@ -18,10 +18,19 @@ class SequenceBlock:
     channels: Dict[Tuple[int, int], bool] = field(default_factory=dict)
     delays_us: Dict[int, float] = field(default_factory=dict)
     analog: Dict[Tuple[int, str, int], AnalogStored] = field(default_factory=dict)
+    col_labels: Tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.cols < 1:
             raise ValueError("block cols must be positive")
+        if len(self.col_labels) != self.cols:
+            labels = tuple(
+                self.col_labels[c] if c < len(self.col_labels) else "" for c in range(self.cols)
+            )
+            object.__setattr__(self, "col_labels", labels)
+
+    def col_label(self, col: int) -> str:
+        return self.col_labels[col]
 
     def with_name(self, name: str) -> SequenceBlock:
         return SequenceBlock(
@@ -31,6 +40,7 @@ class SequenceBlock:
             channels=dict(self.channels),
             delays_us=dict(self.delays_us),
             analog=dict(self.analog),
+            col_labels=self.col_labels,
         )
 
     def with_enabled(self, enabled: bool) -> SequenceBlock:
@@ -41,6 +51,7 @@ class SequenceBlock:
             channels=dict(self.channels),
             delays_us=dict(self.delays_us),
             analog=dict(self.analog),
+            col_labels=self.col_labels,
         )
 
     def with_channel(self, rows: int, row: int, col: int, on: bool) -> SequenceBlock:
@@ -55,6 +66,7 @@ class SequenceBlock:
             channels=new,
             delays_us=dict(self.delays_us),
             analog=dict(self.analog),
+            col_labels=self.col_labels,
         )
 
     def with_delay_us(self, col: int, value_us: float) -> SequenceBlock:
@@ -69,6 +81,22 @@ class SequenceBlock:
             channels=dict(self.channels),
             delays_us=d,
             analog=dict(self.analog),
+            col_labels=self.col_labels,
+        )
+
+    def with_col_label(self, col: int, text: str) -> SequenceBlock:
+        if not (0 <= col < self.cols):
+            raise IndexError("column index out of range")
+        lst = list(self.col_labels)
+        lst[col] = text
+        return SequenceBlock(
+            name=self.name,
+            enabled=self.enabled,
+            cols=self.cols,
+            channels=dict(self.channels),
+            delays_us=dict(self.delays_us),
+            analog=dict(self.analog),
+            col_labels=tuple(lst),
         )
 
     def with_analog(self, rows: int, row: int, param_id: str, col: int, value: AnalogStored) -> SequenceBlock:
@@ -85,6 +113,7 @@ class SequenceBlock:
             channels=dict(self.channels),
             delays_us=dict(self.delays_us),
             analog=a,
+            col_labels=self.col_labels,
         )
 
     def with_timeline_from_model(self, model: SequenceModel) -> SequenceBlock:
@@ -96,6 +125,7 @@ class SequenceBlock:
             channels=dict(model.channels),
             delays_us=dict(model.delays_us),
             analog=dict(model.analog),
+            col_labels=model.col_labels,
         )
 
 
@@ -198,6 +228,7 @@ class SequenceDocument:
                     channels=ch,
                     delays_us=dict(b.delays_us),
                     analog=a,
+                    col_labels=b.col_labels,
                 )
             )
         return SequenceDocument(
@@ -216,6 +247,7 @@ def block_to_sequence_model(doc: SequenceDocument, block_index: int) -> Sequence
         channels=dict(b.channels),
         delays_us=dict(b.delays_us),
         analog=dict(b.analog),
+        col_labels=b.col_labels,
         row_labels=doc.row_labels,
         row_software=doc.row_software,
     )
@@ -235,6 +267,7 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
             channels={},
             delays_us={0: 0.0},
             analog={},
+            col_labels=("",),
             row_labels=doc.row_labels,
             row_software=doc.row_software,
         )
@@ -242,10 +275,12 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
     channels: Dict[Tuple[int, int], bool] = {}
     delays_us: Dict[int, float] = {}
     analog: Dict[Tuple[int, str, int], AnalogStored] = {}
+    col_labels: list[str] = []
     col_off = 0
     for b in use:
         for c in range(b.cols):
             delays_us[col_off + c] = b.delays_us.get(c, 0.0)
+            col_labels.append(b.col_label(c))
         for (r, c), v in b.channels.items():
             if 0 <= r < doc.rows and 0 <= c < b.cols:
                 channels[(r, col_off + c)] = v
@@ -259,6 +294,7 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
         channels=channels,
         delays_us=delays_us,
         analog=analog,
+        col_labels=tuple(col_labels),
         row_labels=doc.row_labels,
         row_software=doc.row_software,
     )
@@ -289,6 +325,7 @@ def document_from_single_model(model: SequenceModel, block_name: str = "Block 1"
         channels=dict(model.channels),
         delays_us=dict(model.delays_us),
         analog=dict(model.analog),
+        col_labels=model.col_labels,
     )
     return SequenceDocument(
         rows=model.rows,

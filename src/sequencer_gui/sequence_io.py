@@ -137,6 +137,7 @@ def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str
         "enabled": block.enabled,
         "cols": block.cols,
         "delays_us": [block.delays_us.get(c, 0.0) for c in range(block.cols)],
+        "col_labels": [block.col_label(c) for c in range(block.cols)],
         "device_rows": _device_rows_from_block(block, rows, document.row_software),
     }
 
@@ -172,6 +173,12 @@ def _block_from_payload(
 
     delays_us = {c: float(delays[c]) for c in range(cols)}
 
+    raw_labels = data.get("col_labels", ())
+    if isinstance(raw_labels, list):
+        col_labels = tuple(str(x) for x in raw_labels)
+    else:
+        col_labels = ()
+
     return SequenceBlock(
         name=name,
         enabled=enabled,
@@ -179,6 +186,7 @@ def _block_from_payload(
         channels=channels,
         delays_us=delays_us,
         analog=analog,
+        col_labels=col_labels,
     )
 
 
@@ -208,6 +216,7 @@ def sequence_model_from_hero_block(
         channels=dict(sb.channels),
         delays_us=dict(sb.delays_us),
         analog=dict(sb.analog),
+        col_labels=sb.col_labels,
         row_labels=labels,
         row_software=row_software,
     )

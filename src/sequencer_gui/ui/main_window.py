@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._matrix.commit_row_labels_to_model()
+        self._matrix.commit_col_labels_to_model()
         save_row_labels(self._state.document.row_labels)
         save_window_geometry(bytes(self.saveGeometry()))
         super().closeEvent(event)

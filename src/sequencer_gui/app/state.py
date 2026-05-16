@@ -53,6 +53,7 @@ class SequenceAppState(QObject):
     row_labels_changed = pyqtSignal()
     sequence_name_changed = pyqtSignal(str)
     run_sequence_changed = pyqtSignal(bool)
+    scan_label_changed = pyqtSignal(str)
     scan_repetitions_changed = pyqtSignal(int)
     scan_parameters_changed = pyqtSignal()
     document_changed = pyqtSignal(SequenceDocument)
@@ -76,6 +77,7 @@ class SequenceAppState(QObject):
         self._active_tab = 0
         self._sequence_name = sequence_name
         self._run_sequence = True
+        self._scan_label = ""
         self._scan_repetitions = 1
         self._scan_parameters: tuple[ScanParameter, ...] = ()
         self._notify_backend()
@@ -114,6 +116,17 @@ class SequenceAppState(QObject):
     def run_sequence(self) -> bool:
         """If False, the host should not run the sequence (pushed to the in-process HERO only; not saved in files)."""
         return self._run_sequence
+
+    @property
+    def scan_label(self) -> str:
+        """User-facing name for this scan experiment (UI only until scan execution exists)."""
+        return self._scan_label
+
+    def set_scan_label(self, label: str) -> None:
+        if self._scan_label == label:
+            return
+        self._scan_label = label
+        self.scan_label_changed.emit(label)
 
     @property
     def scan_repetitions(self) -> int:
@@ -242,6 +255,17 @@ class SequenceAppState(QObject):
         new_b = block.with_delay_us(local_col, value_us)
         self._commit_document(self._document.with_block(bi, new_b))
         self.delays_changed.emit()
+
+    def set_col_label(self, col: int, text: str) -> None:
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
+            return
+        bi, local_col = resolved
+        block = self._document.blocks[bi]
+        if block.col_label(local_col) == text:
+            return
+        new_b = block.with_col_label(local_col, text)
+        self._commit_document(self._document.with_block(bi, new_b))
 
     def set_analog(self, row: int, param_id: str, col: int, value: AnalogStored) -> None:
         resolved = self._timeline_col_to_block(col)

@@ -30,6 +30,20 @@ class ScanPanel(QGroupBox):
         row.setContentsMargins(12, 10, 12, 10)
         row.setSpacing(10)
 
+        controls = QVBoxLayout()
+        controls.setSpacing(6)
+
+        label_row = QHBoxLayout()
+        label_row.setSpacing(8)
+        label_row.addWidget(QLabel("Label:"))
+        self._label = QLineEdit(state.scan_label)
+        self._label.setPlaceholderText("Experiment name")
+        self._label.setMinimumWidth(140)
+        self._label.setToolTip("Name of the scan experiment to perform")
+        self._label.editingFinished.connect(self._on_label_edited)
+        label_row.addWidget(self._label, 1)
+        controls.addLayout(label_row)
+
         reps = QHBoxLayout()
         reps.setSpacing(8)
         reps.addWidget(QLabel("Repetitions:"))
@@ -39,7 +53,9 @@ class ScanPanel(QGroupBox):
         self._repetitions.setToolTip("Number of shots at each scan parameter value")
         self._repetitions.editingFinished.connect(self._on_repetitions_edited)
         reps.addWidget(self._repetitions, 0)
-        row.addLayout(reps, 0)
+        controls.addLayout(reps)
+
+        row.addLayout(controls, 0)
 
         self._cards_host = QWidget()
         self._cards_layout = QHBoxLayout(self._cards_host)
@@ -48,10 +64,9 @@ class ScanPanel(QGroupBox):
 
         self._cards_scroll = QScrollArea()
         self._cards_scroll.setFrameShape(QFrame.NoFrame)
-        self._cards_scroll.setWidgetResizable(False)
+        self._cards_scroll.setWidgetResizable(True)
         self._cards_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._cards_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._cards_scroll.setMinimumHeight(30)
         self._cards_scroll.setWidget(self._cards_host)
         row.addWidget(self._cards_scroll, 1)
 
@@ -61,9 +76,18 @@ class ScanPanel(QGroupBox):
         self._btn_add_param.clicked.connect(self._state.add_scan_parameter)
         row.addWidget(self._btn_add_param, 0, Qt.AlignTop)
 
+        state.scan_label_changed.connect(self._sync_label_from_state)
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
         self._rebuild_param_cards()
+
+    def _sync_label_from_state(self, value: str) -> None:
+        self._label.blockSignals(True)
+        self._label.setText(value)
+        self._label.blockSignals(False)
+
+    def _on_label_edited(self) -> None:
+        self._state.set_scan_label(self._label.text().strip())
 
     def _sync_repetitions_from_state(self, value: int) -> None:
         self._repetitions.blockSignals(True)
@@ -89,12 +113,21 @@ class ScanPanel(QGroupBox):
             self._cards_layout.addWidget(self._make_param_card(i, p))
 
         self._cards_host.adjustSize()
+        if self._state.scan_parameters:
+            card_h = max(
+                self._cards_layout.itemAt(i).widget().sizeHint().height()
+                for i in range(self._cards_layout.count())
+            )
+            self._cards_scroll.setMinimumHeight(card_h)
+        else:
+            self._cards_scroll.setMinimumHeight(0)
+        self.updateGeometry()
 
     def _make_param_card(self, index: int, p: ScanParameter) -> QFrame:
         frame = QFrame()
         frame.setFrameShape(QFrame.StyledPanel)
         frame.setFixedWidth(152)
-        frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
 
         outer = QVBoxLayout(frame)
         outer.setContentsMargins(8, 6, 8, 6)
