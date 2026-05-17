@@ -28,7 +28,7 @@ from sequencer_gui.ui.value_input import CommitFloatLineEdit, parse_float_field
 
 _PAIR_V_SPACING_PX = 4
 _TIME_AFTER_GAP_PX = 14
-_STEP_GROUP_GAP_PX = 10
+_STEP_GROUP_GAP_PX = 4
 _GRID_H_SPACING_PX = 4
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
 # Fallback when layout has not resolved line-edit height yet.
@@ -56,7 +56,7 @@ def _make_timestep_index_label(col: int) -> QLabel:
 
 
 def min_width_for_timeline_cols(_cols: int) -> int:
-    """Minimum outer width of the Sequencer group (label column + at least one step)."""
+    """Minimum outer width of the Sequence Matrix group (label column + at least one step)."""
     return (
         LABEL_COL_MIN_WIDTH_PX
         + _GRID_H_SPACING_PX
@@ -173,7 +173,7 @@ class ChannelMatrix(QGroupBox):
     """Labels panel + timeline strip + matrix panel (matrix owns scrollbars)."""
 
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
-        super().__init__("Sequencer", parent)
+        super().__init__("Sequence Matrix", parent)
         self._state = state
         self._device_rows: list[DeviceRowWidget] = []
         self._col_label_edits: list[QLineEdit] = []
@@ -250,10 +250,45 @@ class ChannelMatrix(QGroupBox):
             if w is not None:
                 w.deleteLater()
 
+    @staticmethod
+    def _viewport_margins(scroll: QScrollArea) -> tuple[int, int, int, int]:
+        m = scroll.viewportMargins()
+        return m.left(), m.top(), m.right(), m.bottom()
+
+    def _sync_scrollbar_gutters(self) -> None:
+        """Match timeline/labels viewport size to the matrix (matrix owns the bars)."""
+        if self._matrix_panel is None:
+            return
+        matrix_vp_h = self._matrix_panel.viewport().height()
+        matrix_vp_w = self._matrix_panel.viewport().width()
+        if self._timeline_panel is not None:
+            l, t, r, b = self._viewport_margins(self._timeline_panel)
+            delta_w = self._timeline_panel.viewport().width() - matrix_vp_w
+            self._timeline_panel.setViewportMargins(l, t, max(0, r + delta_w), b)
+        if self._labels_panel is not None:
+            l, t, r, b = self._viewport_margins(self._labels_panel)
+            delta_h = self._labels_panel.viewport().height() - matrix_vp_h
+            self._labels_panel.setViewportMargins(l, t, r, max(0, b + delta_h))
+
+    def _sync_scroll_hosts_height(self) -> None:
+        """Keep labels and steps scroll content the same height for vertical sync."""
+        if self._labels_panel is None or self._matrix_panel is None:
+            return
+        labels_host = self._labels_panel.widget()
+        steps_host = self._matrix_panel.widget()
+        if labels_host is None or steps_host is None:
+            return
+        h = max(labels_host.sizeHint().height(), steps_host.sizeHint().height())
+        if h < 1:
+            return
+        labels_host.setFixedHeight(h)
+        steps_host.setFixedHeight(h)
+
     def _refresh_horizontal_ranges(self) -> None:
         content_w = self._steps_content_width_px
         if content_w < 1:
             return
+        self._sync_scrollbar_gutters()
         for panel in (self._matrix_panel, self._timeline_panel):
             if panel is None:
                 continue
@@ -281,8 +316,12 @@ class ChannelMatrix(QGroupBox):
         def on_h_range_changed(_lo: int, _hi: int) -> None:
             self._refresh_horizontal_ranges()
 
+        def on_v_range_changed(_lo: int, _hi: int) -> None:
+            self._refresh_horizontal_ranges()
+
         h_matrix.valueChanged.connect(on_matrix_h)
         h_matrix.rangeChanged.connect(on_h_range_changed)
+        v_matrix.rangeChanged.connect(on_v_range_changed)
         _link_scroll_bars(v_matrix, v_labels)
         self._labels_panel.set_shift_horizontal_bar(h_matrix)
         self._timeline_panel.set_shift_horizontal_bar(h_matrix)
@@ -326,6 +365,9 @@ class ChannelMatrix(QGroupBox):
 
     def _after_layout(self) -> None:
         self._layout_panel_heights()
+        for dr in self._device_rows:
+            dr.sync_panel_heights()
+        self._sync_scroll_hosts_height()
         self._refresh_horizontal_ranges()
 
     def reset_horizontal_scroll(self) -> None:
@@ -348,6 +390,7 @@ class ChannelMatrix(QGroupBox):
             self._steps_host.setFixedWidth(steps_w)
         for dr in self._device_rows:
             dr.set_steps_width(steps_w)
+        self._sync_scroll_hosts_height()
         self._refresh_horizontal_ranges()
 
     def _build_time_steps(self, model: SequenceModel) -> int:
@@ -465,14 +508,13 @@ class ChannelMatrix(QGroupBox):
             self._device_rows.append(dr)
             labels_lay.addWidget(dr.label_panel(), 0, Qt.AlignLeft)
             steps_lay.addWidget(dr.steps_panel(), 0, Qt.AlignLeft)
-            if r < model.rows - 1:
-                gap_h = _STEP_GROUP_GAP_PX
+            if r < model.rows - 1 and _STEP_GROUP_GAP_PX > 0:
                 label_gap = QWidget()
-                label_gap.setMinimumHeight(gap_h)
+                label_gap.setFixedHeight(_STEP_GROUP_GAP_PX)
                 label_gap.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 labels_lay.addWidget(label_gap)
                 steps_gap = QWidget()
-                steps_gap.setMinimumHeight(gap_h)
+                steps_gap.setFixedHeight(_STEP_GROUP_GAP_PX)
                 steps_gap.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                 steps_lay.addWidget(steps_gap)
 
@@ -523,6 +565,9 @@ class ChannelMatrix(QGroupBox):
         self._outer.addWidget(main_row, 0)
         self._outer.addStretch(1)
         self._wire_panel_scroll_sync()
+        for dr in self._device_rows:
+            dr.sync_panel_heights()
+        self._sync_scroll_hosts_height()
         self._layout_panel_heights()
 
         self._apply_timeline_read_only()

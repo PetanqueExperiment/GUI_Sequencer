@@ -34,8 +34,11 @@ _ROW_CHECKED_COLORS = (
 
 # One timeline step: delay spin, optional per-device on/off toggle, analog line edit (same width every row).
 STEP_COLUMN_WIDTH_PX = 72
+# Match QLineEdit / combo row height in the device header.
+_CHANNEL_BTN_HEIGHT_PX = 25
 # Must match QGridLayout.setHorizontalSpacing on the row grid.
-_GRID_H_SPACING_PX = 4
+_GRID_H_SPACING_PX = 3
+_GRID_V_SPACING_PX = 2
 
 
 def timeline_steps_width_px(cols: int) -> int:
@@ -55,9 +58,10 @@ def _channel_button_stylesheet(row_index: int) -> str:
     return f"""
         QPushButton {{
             border-radius: 6px;
-            padding: 6px 8px;
+            padding: 0px 0px;
             min-width: 32px;
-            min-height: 22px;
+            min-height: 0;
+            max-height: {_CHANNEL_BTN_HEIGHT_PX}px;
             font-size: 13px;
             font-weight: 500;
             outline: none;
@@ -122,7 +126,7 @@ class DeviceRowWidget:
         for grid in (self._label_grid, self._steps_grid):
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
-            grid.setVerticalSpacing(4)
+            grid.setVerticalSpacing(_GRID_V_SPACING_PX)
 
         m = model
         self._label_panel.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
@@ -157,7 +161,7 @@ class DeviceRowWidget:
         self._sw = RowSoftwareSelector(row, state)
         hlay.addWidget(self._sw, 1)
 
-        self._label_grid.addWidget(header, 0, 0, 2, 1)
+        self._label_grid.addWidget(header, 0, 0)
 
         self._sync_channel_strip(m)
 
@@ -175,11 +179,37 @@ class DeviceRowWidget:
     def set_steps_width(self, steps_w: int) -> None:
         self._steps_panel.setFixedWidth(steps_w)
 
+    def _sync_paired_grid_rows(self) -> None:
+        rows = max(self._label_grid.rowCount(), self._steps_grid.rowCount())
+        for r in range(rows):
+            row_h = 0
+            for grid in (self._label_grid, self._steps_grid):
+                for c in range(grid.columnCount()):
+                    item = grid.itemAtPosition(r, c)
+                    if item is None:
+                        continue
+                    w = item.widget()
+                    if w is None:
+                        continue
+                    # Only size the anchor row of a rowspan — otherwise each spanned
+                    # row gets the full widget height and doubles the header block.
+                    idx = grid.indexOf(w)
+                    if idx < 0:
+                        continue
+                    anchor_row, _col, _rowspan, _colspan = grid.getItemPosition(idx)
+                    if anchor_row != r:
+                        continue
+                    row_h = max(row_h, w.sizeHint().height())
+            if row_h > 0:
+                self._label_grid.setRowMinimumHeight(r, row_h)
+                self._steps_grid.setRowMinimumHeight(r, row_h)
+
     def sync_panel_heights(self) -> None:
+        self._sync_paired_grid_rows()
         h = max(self._label_panel.sizeHint().height(), self._steps_panel.sizeHint().height())
         if h > 0:
-            self._label_panel.setMinimumHeight(h)
-            self._steps_panel.setMinimumHeight(h)
+            self._label_panel.setFixedHeight(h)
+            self._steps_panel.setFixedHeight(h)
 
     def set_timeline_read_only(self, read_only: bool) -> None:
         for btn in self._buttons:
@@ -213,7 +243,8 @@ class DeviceRowWidget:
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+            btn.setFixedHeight(_CHANNEL_BTN_HEIGHT_PX)
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.setStyleSheet(_channel_button_stylesheet(self._row))
             btn.setChecked(model.channel(self._row, c))
 
@@ -225,7 +256,7 @@ class DeviceRowWidget:
 
             btn.toggled.connect(make_toggle(self._row, c))
             self._buttons.append(btn)
-            self._steps_grid.addWidget(btn, 0, c, 2, 1)
+            self._steps_grid.addWidget(btn, 0, c, 1, 1)
 
     def _sync_channel_buttons_from_model(self, model: SequenceModel) -> None:
         for c in range(min(model.cols, len(self._buttons))):
@@ -292,7 +323,7 @@ class DeviceRowWidget:
         self._clear_analog_section()
         obj = get_object(model.row_software_name(self._row))
         cols = model.cols
-        base_row = 2
+        base_row = 1
         for pi, spec in enumerate(obj.analog_parameters):
             g_row = base_row + pi
             lab = QLabel(spec.label)

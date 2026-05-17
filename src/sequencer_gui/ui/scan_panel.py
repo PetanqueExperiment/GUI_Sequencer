@@ -58,6 +58,18 @@ class ScanPanel(QGroupBox):
         reps.addWidget(self._repetitions, 0)
         controls.addLayout(reps)
 
+        scan_actions = QHBoxLayout()
+        scan_actions.setSpacing(8)
+        self._btn_start_scan = QPushButton("Start scan")
+        self._btn_start_scan.setToolTip("Start the configured scan")
+        self._btn_start_scan.clicked.connect(self._on_start_scan)
+        scan_actions.addWidget(self._btn_start_scan)
+        self._btn_interrupt = QPushButton("Interrupt")
+        self._btn_interrupt.setToolTip("Interrupt a running scan")
+        self._btn_interrupt.clicked.connect(self._on_interrupt)
+        scan_actions.addWidget(self._btn_interrupt)
+        controls.addLayout(scan_actions)
+
         row.addLayout(controls, 0)
 
         self._cards_host = QWidget()
@@ -113,6 +125,12 @@ class ScanPanel(QGroupBox):
             return
         n = int(text)
         self._state.set_scan_repetitions(n)
+
+    def _on_start_scan(self) -> None:
+        pass
+
+    def _on_interrupt(self) -> None:
+        pass
 
     def _rebuild_param_cards(self) -> None:
         while self._cards_layout.count():

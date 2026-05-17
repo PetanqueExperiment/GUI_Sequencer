@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -32,17 +33,24 @@ class SequenceToolbar(QGroupBox):
         self._state = state
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(12, 10, 12, 10)
-        row.addWidget(QLabel("Name:"))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(6)
+
+        name_row = QHBoxLayout()
+        name_row.setSpacing(8)
+        name_row.addWidget(QLabel("Name:"))
         self._name = QLineEdit(state.sequence_name)
         self._name.setPlaceholderText("Sequence name")
         self._name.setMinimumWidth(200)
         self._name.setMaximumWidth(360)
         self._name.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._name.editingFinished.connect(self._on_name_edited)
-        row.addWidget(self._name, 0)
+        name_row.addWidget(self._name, 1)
+        outer.addLayout(name_row)
 
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(8)
         self._run_btn = QPushButton()
         self._run_btn.setCheckable(True)
         self._run_btn.setChecked(state.run_sequence)
@@ -50,15 +58,17 @@ class SequenceToolbar(QGroupBox):
         self._run_btn.toggled.connect(self._on_run_toggled)
         self._update_run_button_text(state.run_sequence)
         state.run_sequence_changed.connect(self._on_run_sequence_changed)
-        row.addWidget(self._run_btn, 0)
+        actions_row.addWidget(self._run_btn, 0)
 
         btn_save = QPushButton("Save…")
         btn_save.clicked.connect(self._on_save)
-        row.addWidget(btn_save)
+        actions_row.addWidget(btn_save)
 
         btn_load = QPushButton("Load…")
         btn_load.clicked.connect(self._on_load)
-        row.addWidget(btn_load)
+        actions_row.addWidget(btn_load)
+        actions_row.addStretch(1)
+        outer.addLayout(actions_row)
 
         state.sequence_name_changed.connect(self._on_sequence_name_changed)
 
