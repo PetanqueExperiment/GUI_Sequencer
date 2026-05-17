@@ -22,6 +22,15 @@ WIN32_APP_USER_MODEL_ID = "Petanque.Sequencer.GUI.1"
 # :class:`heros.heros.LocalHERO` instance name (exposed to ARTIQ / HERO).
 HERO_INSTANCE_NAME = "Sequencer_HERO"
 
+# PyCam for Petanque (:class:`PyCam_HERO.PyCam_HERO` in the camera GUI process).
+PYCAM_HERO_INSTANCE_NAME = "PyCam_HERO"
+
+# PyCam repo for live sequence run/pause (not a user scan).
+PYCAM_LIVE_EXPERIMENT_NAME = "Running_without_scan"
+
+# ``Sequencer_HERO.set_burst_shots``: run until paused (live mode).
+BURST_SHOTS_UNLIMITED = -1
+
 
 def set_windows_taskbar_app_id() -> None:
     """

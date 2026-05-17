@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, QStringListModel
+import time
+
+from PyQt5.QtCore import Qt, QStringListModel, QTimer
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QCompleter,
@@ -9,6 +11,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -17,8 +20,18 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import ScanParameter, SequenceAppState
+from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME
+from sequencer_gui.pycam_experiment import (
+    prepare_and_start_experiment,
+    set_parameter_scan_order,
+    shots_seen,
+    stop_experiment_if_running,
+)
+from sequencer_gui.scan_plan import build_scan_tags
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
+
+_PYCAM_PREP_DELAY_S = 0.3
 
 
 class ScanPanel(QGroupBox):
@@ -65,7 +78,8 @@ class ScanPanel(QGroupBox):
         self._btn_start_scan.clicked.connect(self._on_start_scan)
         scan_actions.addWidget(self._btn_start_scan)
         self._btn_interrupt = QPushButton("Interrupt")
-        self._btn_interrupt.setToolTip("Interrupt a running scan")
+        self._btn_interrupt.setEnabled(False)
+        self._btn_interrupt.setToolTip("Stop the running scan")
         self._btn_interrupt.clicked.connect(self._on_interrupt)
         scan_actions.addWidget(self._btn_interrupt)
         controls.addLayout(scan_actions)
@@ -95,7 +109,13 @@ class ScanPanel(QGroupBox):
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
         state.row_labels_changed.connect(self._rebuild_param_cards)
+        state.scan_running_changed.connect(self._apply_scan_running_ui)
         self._rebuild_param_cards()
+        self._apply_scan_running_ui(state.scan_running)
+
+        self._scan_expected_shots = 0
+        self._pycam_poll = QTimer(self)
+        self._pycam_poll.timeout.connect(self._poll_scan_shots)
 
     def _sync_label_from_state(self, value: str) -> None:
         self._label.blockSignals(True)
@@ -126,11 +146,111 @@ class ScanPanel(QGroupBox):
         n = int(text)
         self._state.set_scan_repetitions(n)
 
+    def _apply_scan_running_ui(self, running: bool) -> None:
+        self._btn_start_scan.setEnabled(not running)
+        self._btn_start_scan.setText("Scan running" if running else "Start scan")
+        self._btn_interrupt.setEnabled(running)
+        self._label.setEnabled(not running)
+        self._repetitions.setEnabled(not running)
+        self._btn_add_param.setEnabled(not running)
+        self._cards_scroll.setEnabled(not running)
+
     def _on_start_scan(self) -> None:
-        pass
+        if self._state.scan_running:
+            return
+        self._on_label_edited()
+        self._on_repetitions_edited()
+        name = self._state.scan_label.strip()
+        if not name:
+            QMessageBox.warning(self, "Start scan", "Enter a scan label (PyCam experiment name).")
+            return
+        shots = self._state.scan_repetitions
+        try:
+            scan_tags = build_scan_tags(self._state.scan_parameters, shots)
+        except ValueError as e:
+            QMessageBox.warning(self, "Start scan", str(e))
+            return
+        self._scan_expected_shots = len(scan_tags)
+
+        self._state.set_run_sequence(False)
+        if self._state.run_sequence:
+            QMessageBox.warning(self, "Start scan", "Sequence did not pause.")
+            return
+
+        time.sleep(_PYCAM_PREP_DELAY_S)
+
+        try:
+            from heros import RemoteHERO
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "Start scan",
+                "HERO support is not installed; cannot reach PyCam.",
+            )
+            return
+        try:
+            with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as pycam_hero:
+                set_parameter_scan_order(pycam_hero, scan_tags)
+                prepare_and_start_experiment(pycam_hero, name)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Start scan",
+                f"PyCam scan start failed ({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
+            )
+            return
+
+        self._state.resume_sequence_for_scan_shots(shots)
+        self._state.set_scan_running(True)
+        self._pycam_poll.start(500)
+
+    def _finish_scan(self) -> None:
+        self._pycam_poll.stop()
+        self._scan_expected_shots = 0
+        self._state.set_scan_running(False)
+        self._state.poll_host_run_sequence()
+        if self._state.run_sequence:
+            self._state.set_run_sequence(False)
+
+    def _poll_scan_shots(self) -> None:
+        if not self._state.scan_running or self._scan_expected_shots < 1:
+            return
+        try:
+            from heros import RemoteHERO
+        except ImportError:
+            return
+        try:
+            with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
+                if shots_seen(hero) >= self._scan_expected_shots:
+                    stop_experiment_if_running(hero)
+                    self._finish_scan()
+        except Exception:
+            return
 
     def _on_interrupt(self) -> None:
-        pass
+        if not self._state.scan_running:
+            return
+        try:
+            from heros import RemoteHERO
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "Interrupt",
+                "HERO support is not installed; cannot reach PyCam.",
+            )
+            return
+        try:
+            with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
+                stop_experiment_if_running(hero)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Interrupt",
+                f"Failed to stop PyCam ({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
+            )
+            return
+        self._state.set_run_sequence(False)
+        self._finish_scan()
 
     def _rebuild_param_cards(self) -> None:
         while self._cards_layout.count():

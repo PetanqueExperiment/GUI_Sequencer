@@ -47,7 +47,9 @@ class Sequencer_HERO(LocalHERO):
         object.__setattr__(self, "dict", d)
         super().__init__(name, *args, **kwargs)
         # GUI Pause/Resume; not part of ``set_sequence_data`` / saved JSON.
-        object.__setattr__(self, "_run_sequence", True)
+        object.__setattr__(self, "_run_sequence", False)
+        # Shots the host may run after :meth:`set_run_sequence` True (scan step); not saved in JSON.
+        object.__setattr__(self, "_burst_shots", 0)
         object.__setattr__(self, "_param_rev", 0)
         # ``-1`` never matches any post-increment rev so the consumer sees "stale" until first ack.
         object.__setattr__(self, "_param_acked_rev", -1)
@@ -354,7 +356,18 @@ class Sequencer_HERO(LocalHERO):
 
     def get_run_sequence(self) -> bool:
         """True = run allowed; false = paused (see :meth:`set_run_sequence`)."""
-        return bool(getattr(self, "_run_sequence", True))
+        return bool(getattr(self, "_run_sequence", False))
+
+    def set_burst_shots(self, n: int) -> None:
+        """Shot budget while running: ``-1`` = unlimited (live), ``0`` = one shot, ``n>0`` = scan burst."""
+        n = int(n)
+        if n < -1:
+            n = -1
+        object.__setattr__(self, "_burst_shots", n)
+
+    def get_burst_shots(self) -> "numpy.int32":
+        """``-1`` unlimited (live), ``0`` one shot, ``n>0`` finite scan burst."""
+        return numpy.int32(int(getattr(self, "_burst_shots", 0)))
 
 
 if __name__ == "__main__":

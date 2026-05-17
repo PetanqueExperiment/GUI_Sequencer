@@ -339,3 +339,17 @@ def default_document(row_labels: Tuple[str, ...]) -> SequenceDocument:
     """One block with the same default timeline shape as a standalone SequenceModel."""
     base = SequenceModel(row_labels=row_labels)
     return document_from_single_model(base, block_name="Block 1")
+
+
+def complete_timeline_duration_us(doc: SequenceDocument) -> float:
+    """Sum of per-step delays for the merged enabled-blocks timeline (runtime shape)."""
+    model = merge_blocks(doc, enabled_only=True)
+    return sum(model.delay_us(c, 0.0) for c in range(model.cols))
+
+
+def complete_cycle_rate_hz(doc: SequenceDocument) -> float | None:
+    """Experiment repetition rate (Hz) for one full enabled-blocks cycle; ``None`` if duration is zero."""
+    us = complete_timeline_duration_us(doc)
+    if us <= 0.0:
+        return None
+    return 1e6 / us

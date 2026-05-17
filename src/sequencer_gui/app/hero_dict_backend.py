@@ -16,6 +16,8 @@ class _SequenceDataHost(Protocol):
 
     def set_run_sequence(self, on: bool) -> None: ...
 
+    def set_burst_shots(self, n: int) -> None: ...
+
 
 class HeroDictBackend:
     """
@@ -32,6 +34,12 @@ class HeroDictBackend:
 
     def sync_run_sequence(self, on: bool) -> None:
         self._host.set_run_sequence(on)
+
+    def read_run_sequence(self) -> bool:
+        return self._host.get_run_sequence()
+
+    def sync_burst_shots(self, n: int) -> None:
+        self._host.set_burst_shots(n)
 
     def apply(self, model: SequenceModel) -> None:
         del model

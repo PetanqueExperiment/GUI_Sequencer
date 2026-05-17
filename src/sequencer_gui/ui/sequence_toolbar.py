@@ -16,7 +16,10 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
+from sequencer_gui.domain.document import complete_cycle_rate_hz, complete_timeline_duration_us
 from sequencer_gui.persistence import save_last_sequence_path
+from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME, PYCAM_LIVE_EXPERIMENT_NAME
+from sequencer_gui.pycam_experiment import prepare_live_experiment, sync_live_experiment_name
 from sequencer_gui.sequence_io import (
     SequenceFileError,
     load_sequence,
@@ -49,15 +52,34 @@ class SequenceToolbar(QGroupBox):
         name_row.addWidget(self._name, 1)
         outer.addLayout(name_row)
 
+        timing_row = QHBoxLayout()
+        timing_row.setSpacing(8)
+        timing_row.addWidget(QLabel("Duration:"))
+        self._duration = QLabel()
+        self._duration.setToolTip("Total time of the Complete sequence (enabled blocks only).")
+        timing_row.addWidget(self._duration)
+        timing_row.addSpacing(12)
+        timing_row.addWidget(QLabel("Cycle rate:"))
+        self._cycle_rate = QLabel()
+        self._cycle_rate.setToolTip("Expected experiment rate: 1 / duration (enabled blocks only).")
+        timing_row.addWidget(self._cycle_rate)
+        timing_row.addStretch(1)
+        outer.addLayout(timing_row)
+
         actions_row = QHBoxLayout()
         actions_row.setSpacing(8)
         self._run_btn = QPushButton()
         self._run_btn.setCheckable(True)
         self._run_btn.setChecked(state.run_sequence)
-        self._run_btn.setToolTip("Pause/Resume: host reads run state on the in-process HERO (not in saved files).")
+        self._run_btn.setToolTip(
+            "Live run/pause (PyCam repo "
+            f"{PYCAM_LIVE_EXPERIMENT_NAME!r}; disabled while a scan is running)."
+        )
         self._run_btn.toggled.connect(self._on_run_toggled)
         self._update_run_button_text(state.run_sequence)
         state.run_sequence_changed.connect(self._on_run_sequence_changed)
+        state.scan_running_changed.connect(self._on_scan_running_changed)
+        self._on_scan_running_changed(state.scan_running)
         actions_row.addWidget(self._run_btn, 0)
 
         btn_save = QPushButton("Save…")
@@ -71,6 +93,16 @@ class SequenceToolbar(QGroupBox):
         outer.addLayout(actions_row)
 
         state.sequence_name_changed.connect(self._on_sequence_name_changed)
+        state.document_changed.connect(self._refresh_timing)
+        state.delays_changed.connect(self._refresh_timing)
+        self._refresh_timing()
+
+    def _refresh_timing(self) -> None:
+        doc = self._state.document
+        ms = complete_timeline_duration_us(doc) / 1000.0
+        self._duration.setText(f"{ms:.0f} ms")
+        hz = complete_cycle_rate_hz(doc)
+        self._cycle_rate.setText("—" if hz is None else f"{hz:.1f} Hz")
 
     def _on_sequence_name_changed(self, name: str) -> None:
         if self._name.text() != name:
@@ -82,8 +114,36 @@ class SequenceToolbar(QGroupBox):
         # ``on`` = allow running; button shows "Pause" to mean "click to pause".
         self._run_btn.setText("Running" if on else "Paused")
 
+    def _on_scan_running_changed(self, running: bool) -> None:
+        self._run_btn.setEnabled(not running)
+
+    def _sync_pycam_live_experiment(self, *, start: bool) -> None:
+        try:
+            from heros import RemoteHERO
+        except ImportError as e:
+            raise RuntimeError("HERO support is not installed; cannot reach PyCam.") from e
+        with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
+            if start:
+                prepare_live_experiment(hero)
+            else:
+                sync_live_experiment_name(hero)
+
     def _on_run_toggled(self, checked: bool) -> None:
-        self._state.set_run_sequence(checked)
+        if self._state.scan_running:
+            return
+        try:
+            self._sync_pycam_live_experiment(start=checked)
+        except Exception as e:
+            QMessageBox.warning(self, "Run / pause", str(e))
+            self._run_btn.blockSignals(True)
+            self._run_btn.setChecked(not checked)
+            self._run_btn.blockSignals(False)
+            self._update_run_button_text(not checked)
+            return
+        if checked:
+            self._state.resume_live_sequence()
+        else:
+            self._state.set_run_sequence(False)
         self._update_run_button_text(checked)
 
     def _on_run_sequence_changed(self, on: bool) -> None:

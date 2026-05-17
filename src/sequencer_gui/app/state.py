@@ -5,6 +5,7 @@ from typing import NamedTuple
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from sequencer_gui.app.backend import NoOpBackend, SequenceBackendProtocol
+from sequencer_gui.process_identity import BURST_SHOTS_UNLIMITED
 from sequencer_gui.domain.document import (
     SequenceBlock,
     SequenceDocument,
@@ -55,6 +56,7 @@ class SequenceAppState(QObject):
     row_labels_changed = pyqtSignal()
     sequence_name_changed = pyqtSignal(str)
     run_sequence_changed = pyqtSignal(bool)
+    scan_running_changed = pyqtSignal(bool)
     scan_label_changed = pyqtSignal(str)
     scan_repetitions_changed = pyqtSignal(int)
     scan_parameters_changed = pyqtSignal()
@@ -78,11 +80,13 @@ class SequenceAppState(QObject):
             raise ValueError("document or model is required")
         self._active_tab = 0
         self._sequence_name = sequence_name
-        self._run_sequence = True
+        self._run_sequence = False
+        self._scan_running = False
         self._scan_label = ""
         self._scan_repetitions = 1
         self._scan_parameters: tuple[ScanParameter, ...] = ()
         self._notify_backend()
+        self._backend.sync_run_sequence(False)
 
     def _notify_backend(self) -> None:
         self._backend.sync_sequence_snapshot(self._document, self._sequence_name)
@@ -118,6 +122,16 @@ class SequenceAppState(QObject):
     def run_sequence(self) -> bool:
         """If False, the host should not run the sequence (pushed to the in-process HERO only; not saved in files)."""
         return self._run_sequence
+
+    @property
+    def scan_running(self) -> bool:
+        return self._scan_running
+
+    def set_scan_running(self, on: bool) -> None:
+        if self._scan_running == on:
+            return
+        self._scan_running = on
+        self.scan_running_changed.emit(on)
 
     @property
     def scan_label(self) -> str:
@@ -208,6 +222,34 @@ class SequenceAppState(QObject):
         self._run_sequence = on
         self.run_sequence_changed.emit(on)
         self._backend.sync_run_sequence(on)
+        if not on:
+            self._backend.sync_burst_shots(0)
+
+    def poll_host_run_sequence(self) -> None:
+        """Mirror run/pause from the in-process HERO when the host changes it (e.g. after a scan)."""
+        if self._scan_running:
+            return
+        read = getattr(self._backend, "read_run_sequence", None)
+        if read is None:
+            return
+        on = read()
+        if on == self._run_sequence:
+            return
+        self._run_sequence = on
+        self.run_sequence_changed.emit(on)
+
+    def resume_sequence_for_scan_shots(self, shots: int | None = None) -> None:
+        """Set burst shot budget on the host, then resume (Repetitions when ``shots`` is omitted)."""
+        n = self._scan_repetitions if shots is None else shots
+        if n < 1:
+            n = 1
+        self._backend.sync_burst_shots(n)
+        self.set_run_sequence(True)
+
+    def resume_live_sequence(self) -> None:
+        """Live run/pause mode: no shot limit until the user pauses or a scan starts."""
+        self._backend.sync_burst_shots(BURST_SHOTS_UNLIMITED)
+        self.set_run_sequence(True)
 
     def set_sequence_name(self, name: str) -> None:
         self._sequence_name = name

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import QByteArray, Qt
+from PyQt5.QtCore import QByteArray, Qt, QTimer
 from PyQt5.QtGui import QCloseEvent, QGuiApplication, QShowEvent
 from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabBar, QVBoxLayout, QWidget
 
@@ -51,6 +51,10 @@ class MainWindow(QMainWindow):
 
         state.document_changed.connect(self._sync_tab_titles)
         state.active_tab_changed.connect(self._sync_tab_selection)
+
+        self._run_poll = QTimer(self)
+        self._run_poll.timeout.connect(state.poll_host_run_sequence)
+        self._run_poll.start(300)
 
         self._sync_tab_titles()
 
