@@ -36,8 +36,8 @@ _ROW_CHECKED_COLORS = (
 STEP_COLUMN_WIDTH_PX = 72
 # Match QLineEdit / combo row height in the device header.
 _CHANNEL_BTN_HEIGHT_PX = 25
-# Must match QGridLayout.setHorizontalSpacing on the row grid.
-_GRID_H_SPACING_PX = 3
+# Must match QGridLayout.setHorizontalSpacing on timeline + matrix step grids.
+GRID_H_SPACING_PX = 3
 _GRID_V_SPACING_PX = 2
 
 
@@ -45,12 +45,12 @@ def timeline_steps_width_px(cols: int) -> int:
     """Width of the scrollable step columns only."""
     if cols < 1:
         cols = 1
-    return cols * STEP_COLUMN_WIDTH_PX + max(0, cols - 1) * _GRID_H_SPACING_PX
+    return cols * STEP_COLUMN_WIDTH_PX + max(0, cols - 1) * GRID_H_SPACING_PX
 
 
 def timeline_content_width_px(cols: int) -> int:
     """Full row width (label column + gap + step columns)."""
-    return LABEL_COL_MIN_WIDTH_PX + _GRID_H_SPACING_PX + timeline_steps_width_px(cols)
+    return LABEL_COL_MIN_WIDTH_PX + GRID_H_SPACING_PX + timeline_steps_width_px(cols)
 
 
 def _channel_button_stylesheet(row_index: int) -> str:
@@ -125,7 +125,7 @@ class DeviceRowWidget:
         self._steps_grid = QGridLayout(self._steps_panel)
         for grid in (self._label_grid, self._steps_grid):
             grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
+            grid.setHorizontalSpacing(GRID_H_SPACING_PX)
             grid.setVerticalSpacing(_GRID_V_SPACING_PX)
 
         m = model

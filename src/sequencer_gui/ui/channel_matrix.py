@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.ui.device_row import (
+    GRID_H_SPACING_PX,
     STEP_COLUMN_WIDTH_PX,
     DeviceRowWidget,
     timeline_steps_width_px,
@@ -29,7 +30,6 @@ from sequencer_gui.ui.value_input import CommitFloatLineEdit, parse_float_field
 _PAIR_V_SPACING_PX = 4
 _TIME_AFTER_GAP_PX = 14
 _STEP_GROUP_GAP_PX = 4
-_GRID_H_SPACING_PX = 4
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
 # Fallback when layout has not resolved line-edit height yet.
 _INDEX_ROW_MIN_HEIGHT_PX = 20
@@ -59,7 +59,7 @@ def min_width_for_timeline_cols(_cols: int) -> int:
     """Minimum outer width of the Sequence Matrix group (label column + at least one step)."""
     return (
         LABEL_COL_MIN_WIDTH_PX
-        + _GRID_H_SPACING_PX
+        + GRID_H_SPACING_PX
         + STEP_COLUMN_WIDTH_PX
         + _MATRIX_MIN_WIDTH_EXTRA_PX
     )
@@ -166,7 +166,7 @@ class _TimelinePanel(QScrollArea):
         bar = self.horizontalScrollBar()
         bar.setRange(0, max(0, content_w - viewport_w))
         bar.setPageStep(viewport_w)
-        bar.setSingleStep(STEP_COLUMN_WIDTH_PX + _GRID_H_SPACING_PX)
+        bar.setSingleStep(STEP_COLUMN_WIDTH_PX + GRID_H_SPACING_PX)
 
 
 class ChannelMatrix(QGroupBox):
@@ -296,7 +296,7 @@ class ChannelMatrix(QGroupBox):
             bar = panel.horizontalScrollBar()
             bar.setRange(0, max(0, content_w - viewport_w))
             bar.setPageStep(viewport_w)
-            bar.setSingleStep(STEP_COLUMN_WIDTH_PX + _GRID_H_SPACING_PX)
+            bar.setSingleStep(STEP_COLUMN_WIDTH_PX + GRID_H_SPACING_PX)
         if self._matrix_panel is not None and self._timeline_panel is not None:
             self._timeline_panel.set_scroll_x(self._matrix_panel.horizontalScrollBar().value())
 
@@ -397,7 +397,7 @@ class ChannelMatrix(QGroupBox):
         self._time_steps = QWidget()
         ts_grid = QGridLayout(self._time_steps)
         ts_grid.setContentsMargins(0, 0, 0, 0)
-        ts_grid.setHorizontalSpacing(_GRID_H_SPACING_PX)
+        ts_grid.setHorizontalSpacing(GRID_H_SPACING_PX)
         ts_grid.setVerticalSpacing(_PAIR_V_SPACING_PX)
         for col in range(model.cols):
             ts_grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
@@ -558,7 +558,7 @@ class ChannelMatrix(QGroupBox):
         main_row = QWidget()
         main_hbox = QHBoxLayout(main_row)
         main_hbox.setContentsMargins(0, 0, 0, 0)
-        main_hbox.setSpacing(_GRID_H_SPACING_PX)
+        main_hbox.setSpacing(GRID_H_SPACING_PX)
         main_hbox.addWidget(left_col, 0, Qt.AlignLeft | Qt.AlignTop)
         main_hbox.addWidget(right_col, 1)
 
