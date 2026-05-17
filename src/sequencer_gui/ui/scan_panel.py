@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
 
 from sequencer_gui.app.state import ScanParameter, SequenceAppState
 from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME
+from sequencer_gui.pycam_repository import ScanLabelAvailability, classify_scan_label
 from sequencer_gui.pycam_experiment import (
     prepare_and_start_experiment,
     set_parameter_scan_order,
@@ -36,6 +37,19 @@ from sequencer_gui.software_objects import get_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
 _PYCAM_PREP_DELAY_S = 0.3
+
+_LABEL_STYLE_DEFAULT = "color: #212121;"
+_LABEL_STYLE_BY_AVAILABILITY = {
+    ScanLabelAvailability.UNUSED: "color: #c62828;",
+    ScanLabelAvailability.USED_TODAY: "color: #1565c0;",
+    ScanLabelAvailability.IN_PROGRESS: "color: #2e7d32;",
+}
+_LABEL_TOOLTIP = (
+    "Name of the scan experiment to perform (PyCam data folder for today).\n"
+    "Red: new name (no folder yet today).\n"
+    "Blue: name already used today.\n"
+    "Green: scan in progress with this name."
+)
 
 
 class ScanPanel(QGroupBox):
@@ -59,7 +73,8 @@ class ScanPanel(QGroupBox):
         self._label = QLineEdit(state.scan_label)
         self._label.setPlaceholderText("Experiment name")
         self._label.setMinimumWidth(140)
-        self._label.setToolTip("Name of the scan experiment to perform")
+        self._label.setToolTip(_LABEL_TOOLTIP)
+        self._label.textChanged.connect(self._update_label_color)
         self._label.editingFinished.connect(self._on_label_edited)
         label_row.addWidget(self._label, 1)
         controls.addLayout(label_row)
@@ -114,8 +129,14 @@ class ScanPanel(QGroupBox):
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
         state.row_labels_changed.connect(self._rebuild_param_cards)
         state.scan_running_changed.connect(self._apply_scan_running_ui)
+        state.scan_running_changed.connect(lambda _running: self._update_label_color())
         self._rebuild_param_cards()
         self._apply_scan_running_ui(state.scan_running)
+
+        self._label_color_poll = QTimer(self)
+        self._label_color_poll.timeout.connect(self._update_label_color)
+        self._label_color_poll.start(2000)
+        self._update_label_color()
 
         self._scan_expected_shots = 0
         self._scan_repetitions = 1
@@ -128,9 +149,20 @@ class ScanPanel(QGroupBox):
         self._label.blockSignals(True)
         self._label.setText(value)
         self._label.blockSignals(False)
+        self._update_label_color()
 
     def _on_label_edited(self) -> None:
         self._state.set_scan_label(self._label.text().strip())
+
+    def _update_label_color(self) -> None:
+        status = classify_scan_label(
+            self._label.text(),
+            scan_running=self._state.scan_running,
+            active_scan_label=self._state.scan_label,
+        )
+        style = _LABEL_STYLE_BY_AVAILABILITY.get(status, _LABEL_STYLE_DEFAULT)
+        if self._label.styleSheet() != style:
+            self._label.setStyleSheet(style)
 
     def _sync_repetitions_from_state(self, value: int) -> None:
         self._repetitions.blockSignals(True)
