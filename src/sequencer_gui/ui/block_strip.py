@@ -233,18 +233,15 @@ class BlockStripWidget(QGroupBox):
             on_btn.setText("On" if b.enabled else "Off")
             row_actions.addWidget(on_btn)
 
-            btn_remove = QPushButton("Remove")
-            btn_remove.setEnabled(len(doc.blocks) > 1)
-
-            def make_remove(ii: int):
-                def on_remove() -> None:
-                    self._state.remove_block(ii)
-
-                return on_remove
-
-            btn_remove.clicked.connect(make_remove(idx))
-            row_actions.addWidget(btn_remove)
             row_actions.addStretch(1)
+
+            btn_remove = QPushButton("\u00d7")
+            btn_remove.setFixedSize(22, 22)
+            btn_remove.setFlat(True)
+            btn_remove.setToolTip("Remove block")
+            btn_remove.setEnabled(len(doc.blocks) > 1)
+            btn_remove.clicked.connect(lambda checked=False, ii=idx: self._state.remove_block(ii))
+            row_actions.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
             outer.addLayout(row_actions)
 
             row.addWidget(frame)

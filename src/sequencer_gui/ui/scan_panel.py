@@ -144,6 +144,22 @@ class ScanPanel(QGroupBox):
         except ValueError:
             return None
 
+    def _label_from_index_field_text(self, raw: str, labels: tuple[str, ...]) -> str:
+        """0-based index (as in the channel matrix header) -> label; otherwise unchanged."""
+        text = raw.strip()
+        if not text.isdigit():
+            return text
+        idx = int(text)
+        if 0 <= idx < len(labels):
+            return labels[idx]
+        return text
+
+    def _device_label_from_field_text(self, raw: str) -> str:
+        return self._label_from_index_field_text(raw, self._state.document.row_labels)
+
+    def _timestep_label_from_field_text(self, raw: str) -> str:
+        return self._label_from_index_field_text(raw, self._state.model.col_labels)
+
     def _populate_param_combo(
         self, combo: _NoWheelComboBox, device_label: str, selected_param_id: str
     ) -> str:
@@ -182,7 +198,10 @@ class ScanPanel(QGroupBox):
 
         device_edit = QLineEdit(p.device_label)
         device_edit.setPlaceholderText("Device")
-        device_edit.setToolTip("Row label of the device in the sequence")
+        device_edit.setToolTip(
+            "Row label of the device in the sequence. "
+            "Enter a 0-based row index and press Enter to fill the label."
+        )
         device_edit.setCompleter(
             QCompleter(QStringListModel(list(self._state.document.row_labels)), device_edit)
         )
@@ -198,7 +217,11 @@ class ScanPanel(QGroupBox):
             dev: QLineEdit = device_edit,
             combo: _NoWheelComboBox = param_combo,
         ) -> None:
-            label = dev.text().strip()
+            label = self._device_label_from_field_text(dev.text())
+            if label != dev.text().strip():
+                dev.blockSignals(True)
+                dev.setText(label)
+                dev.blockSignals(False)
             self._state.set_scan_parameter_device_label(idx, label)
             new_param_id = self._populate_param_combo(combo, label, self._state.scan_parameters[idx].param_id)
             if new_param_id != self._state.scan_parameters[idx].param_id:
@@ -215,10 +238,23 @@ class ScanPanel(QGroupBox):
         timestep_edit = QLineEdit(p.timestep_label)
         timestep_edit.setPlaceholderText("Timestep label")
         timestep_edit.setMinimumWidth(100)
-        timestep_edit.setToolTip("Label of the timestep this parameter drives")
-        timestep_edit.editingFinished.connect(
-            lambda idx=index, e=timestep_edit: self._state.set_scan_parameter_timestep_label(idx, e.text())
+        timestep_edit.setToolTip(
+            "Label of the timestep this parameter drives. "
+            "Enter a 0-based column index and press Enter to fill the label."
         )
+        timestep_edit.setCompleter(
+            QCompleter(QStringListModel(list(self._state.model.col_labels)), timestep_edit)
+        )
+
+        def on_timestep_edited(idx: int = index, edit: QLineEdit = timestep_edit) -> None:
+            label = self._timestep_label_from_field_text(edit.text())
+            if label != edit.text().strip():
+                edit.blockSignals(True)
+                edit.setText(label)
+                edit.blockSignals(False)
+            self._state.set_scan_parameter_timestep_label(idx, label)
+
+        timestep_edit.editingFinished.connect(on_timestep_edited)
         top.addWidget(timestep_edit, 0)
 
         btn_remove = QPushButton("\u00d7")
