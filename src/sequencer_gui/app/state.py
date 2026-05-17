@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from sequencer_gui.scan_plan import ScanPoint
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from sequencer_gui.app.backend import NoOpBackend, SequenceBackendProtocol
 from sequencer_gui.process_identity import BURST_SHOTS_UNLIMITED
+from sequencer_gui.domain.analog_stored import AnalogStored
 from sequencer_gui.domain.document import (
     SequenceBlock,
     SequenceDocument,
@@ -14,7 +18,6 @@ from sequencer_gui.domain.document import (
     merge_blocks,
     merged_enabled_timeline_col_to_block,
 )
-from sequencer_gui.domain.analog_stored import AnalogStored
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object
 
@@ -85,6 +88,8 @@ class SequenceAppState(QObject):
         self._scan_label = ""
         self._scan_repetitions = 1
         self._scan_parameters: tuple[ScanParameter, ...] = ()
+        # Cells touched during a scan; restored when the scan ends or is interrupted.
+        self._scan_restore: dict[tuple[int, int, str, int], AnalogStored] | None = None
         self._notify_backend()
         self._backend.sync_run_sequence(False)
 
@@ -250,6 +255,62 @@ class SequenceAppState(QObject):
         """Live run/pause mode: no shot limit until the user pauses or a scan starts."""
         self._backend.sync_burst_shots(BURST_SHOTS_UNLIMITED)
         self.set_run_sequence(True)
+
+    def prepare_scan_matrix_restore(self) -> None:
+        """Remember analog cells that a scan will overwrite (call before applying scan points)."""
+        from sequencer_gui.scan_plan import resolve_scan_bindings
+
+        bindings = resolve_scan_bindings(self._document, self._scan_parameters)
+        restore: dict[tuple[int, int, str, int], AnalogStored] = {}
+        for b in bindings:
+            resolved = merged_enabled_timeline_col_to_block(self._document, b.merged_col)
+            if resolved is None:
+                continue
+            bi, local_col = resolved
+            block = self._document.blocks[bi]
+            key = (b.row, bi, b.param_id, local_col)
+            if key not in restore:
+                restore[key] = block.analog.get((b.row, b.param_id, local_col), "hold")
+        self._scan_restore = restore
+
+    def restore_scan_matrix(self) -> None:
+        """Put scan-touched analog cells back to their pre-scan values."""
+        if not self._scan_restore:
+            self._scan_restore = None
+            return
+        doc = self._document
+        for (row, bi, param_id, local_col), stored in self._scan_restore.items():
+            block = doc.blocks[bi]
+            doc = doc.with_block(
+                bi,
+                block.with_analog(doc.rows, row, param_id, local_col, stored),
+            )
+        self._scan_restore = None
+        if doc is not self._document:
+            self._commit_document(doc)
+            self.analog_changed.emit()
+
+    def apply_scan_point(self, point: ScanPoint) -> None:
+        """Write one scan step into the sequence document (enabled-blocks timeline)."""
+        doc = self._document
+        for binding, value in zip(point.bindings, point.values):
+            resolved = merged_enabled_timeline_col_to_block(doc, binding.merged_col)
+            if resolved is None:
+                continue
+            bi, local_col = resolved
+            block = doc.blocks[bi]
+            doc = doc.with_block(
+                bi,
+                block.with_analog(doc.rows, binding.row, binding.param_id, local_col, float(value)),
+            )
+        if doc is not self._document:
+            self._commit_document(doc)
+            self.analog_changed.emit()
+
+    def build_scan_points(self) -> list:
+        from sequencer_gui.scan_plan import build_scan_points
+
+        return build_scan_points(self._document, self._scan_parameters)
 
     def set_sequence_name(self, name: str) -> None:
         self._sequence_name = name

@@ -27,7 +27,7 @@ from sequencer_gui.pycam_experiment import (
     shots_seen,
     stop_experiment_if_running,
 )
-from sequencer_gui.scan_plan import build_scan_tags
+from sequencer_gui.scan_plan import build_scan_tags, resolve_scan_bindings
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
@@ -35,7 +35,7 @@ _PYCAM_PREP_DELAY_S = 0.3
 
 
 class ScanPanel(QGroupBox):
-    """Scan configuration (repetitions per parameter step); execution wired later."""
+    """Scan configuration: matrix values per step, repetitions per value, PyCam tagging."""
 
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__("Scan", parent)
@@ -114,6 +114,9 @@ class ScanPanel(QGroupBox):
         self._apply_scan_running_ui(state.scan_running)
 
         self._scan_expected_shots = 0
+        self._scan_repetitions = 1
+        self._scan_points: list = []
+        self._scan_step_index = 0
         self._pycam_poll = QTimer(self)
         self._pycam_poll.timeout.connect(self._poll_scan_shots)
 
@@ -166,11 +169,17 @@ class ScanPanel(QGroupBox):
             return
         shots = self._state.scan_repetitions
         try:
+            if self._state.scan_parameters:
+                resolve_scan_bindings(self._state.document, self._state.scan_parameters)
+            scan_points = self._state.build_scan_points()
             scan_tags = build_scan_tags(self._state.scan_parameters, shots)
         except ValueError as e:
             QMessageBox.warning(self, "Start scan", str(e))
             return
         self._scan_expected_shots = len(scan_tags)
+        self._scan_repetitions = shots
+        self._scan_points = scan_points
+        self._scan_step_index = 0
 
         self._state.set_run_sequence(False)
         if self._state.run_sequence:
@@ -200,20 +209,55 @@ class ScanPanel(QGroupBox):
             )
             return
 
-        self._state.resume_sequence_for_scan_shots(shots)
+        self._state.prepare_scan_matrix_restore()
         self._state.set_scan_running(True)
+        self._begin_scan_step(0)
         self._pycam_poll.start(500)
+
+    def _pycam_shots_done_for_step(self, shots_seen_count: int, step_index: int) -> bool:
+        return shots_seen_count >= (step_index + 1) * self._scan_repetitions
+
+    def _begin_scan_step(self, step_index: int) -> None:
+        if not (0 <= step_index < len(self._scan_points)):
+            return
+        self._scan_step_index = step_index
+        if self._state.run_sequence:
+            self._state.set_run_sequence(False)
+        self._state.apply_scan_point(self._scan_points[step_index])
+        self._state.resume_sequence_for_scan_shots(self._scan_repetitions)
+
+    def _advance_scan_if_ready(self, shots_seen_count: int) -> None:
+        if not self._pycam_shots_done_for_step(shots_seen_count, self._scan_step_index):
+            return
+        next_step = self._scan_step_index + 1
+        if next_step < len(self._scan_points):
+            self._begin_scan_step(next_step)
+            return
+        if shots_seen_count >= self._scan_expected_shots:
+            self._finish_scan()
 
     def _finish_scan(self) -> None:
         self._pycam_poll.stop()
         self._scan_expected_shots = 0
-        self._state.set_scan_running(False)
-        self._state.poll_host_run_sequence()
+        self._scan_points = []
+        self._scan_step_index = 0
         if self._state.run_sequence:
             self._state.set_run_sequence(False)
+        self._state.restore_scan_matrix()
+        self._state.set_scan_running(False)
+        self._state.poll_host_run_sequence()
+        try:
+            from heros import RemoteHERO
+        except ImportError:
+            return
+        try:
+            with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
+                stop_experiment_if_running(hero)
+        except Exception:
+            pass
 
     def _poll_scan_shots(self) -> None:
-        if not self._state.scan_running or self._scan_expected_shots < 1:
+        if not self._state.scan_running:
             return
         try:
             from heros import RemoteHERO
@@ -221,8 +265,10 @@ class ScanPanel(QGroupBox):
             return
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
-                if shots_seen(hero) >= self._scan_expected_shots:
-                    stop_experiment_if_running(hero)
+                seen = shots_seen(hero)
+                if self._scan_points:
+                    self._advance_scan_if_ready(seen)
+                elif seen >= self._scan_expected_shots:
                     self._finish_scan()
         except Exception:
             return
@@ -289,7 +335,9 @@ class ScanPanel(QGroupBox):
             return text
         idx = int(text)
         if 0 <= idx < len(labels):
-            return labels[idx]
+            label = labels[idx].strip()
+            if label:
+                return label
         return text
 
     def _device_label_from_field_text(self, raw: str) -> str:

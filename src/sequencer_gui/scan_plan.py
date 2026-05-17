@@ -1,11 +1,15 @@
-"""Build PyCam parameter-scan tag lists from GUI scan parameters."""
+"""Build PyCam scan tags and matrix scan steps from GUI scan parameters."""
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from itertools import product
 
 from sequencer_gui.app.state import ScanParameter
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored
+from sequencer_gui.domain.document import SequenceDocument, merge_blocks, merged_enabled_timeline_col_to_block
+from sequencer_gui.software_objects import get_object
 
 
 def _format_param_value(value: float) -> str:
@@ -68,3 +72,103 @@ def build_scan_tags(parameters: tuple[ScanParameter, ...], repetitions: int) -> 
 
 def expected_shot_count(parameters: tuple[ScanParameter, ...], repetitions: int) -> int:
     return len(build_scan_tags(parameters, repetitions))
+
+
+@dataclass(frozen=True)
+class ScanCellBinding:
+    """One matrix cell in the merged enabled-blocks timeline."""
+
+    row: int
+    param_id: str
+    merged_col: int
+
+
+@dataclass(frozen=True)
+class ScanPoint:
+    """One scan step: set each bound cell, then play ``repetitions`` shots."""
+
+    bindings: tuple[ScanCellBinding, ...]
+    values: tuple[float, ...]
+
+
+def merged_col_for_timestep_label(document: SequenceDocument, timestep_label: str) -> int | None:
+    """Resolve a timestep label (or 0-based merged column index) on the enabled timeline."""
+    label = timestep_label.strip()
+    if not label:
+        return None
+    model = merge_blocks(document, enabled_only=True)
+    matches = [c for c in range(model.cols) if model.col_labels[c] == label]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return matches[0]
+    if label.isdigit():
+        idx = int(label)
+        if 0 <= idx < model.cols:
+            return idx
+    return None
+
+
+def resolve_scan_bindings(
+    document: SequenceDocument, parameters: tuple[ScanParameter, ...]
+) -> tuple[ScanCellBinding, ...]:
+    """Validate scan cards and return one matrix cell per parameter axis."""
+    if not parameters:
+        return ()
+    bindings: list[ScanCellBinding] = []
+    for p in parameters:
+        device = p.device_label.strip()
+        if not device:
+            raise ValueError("Each scan parameter needs a device (row label).")
+        try:
+            row = document.row_labels.index(device)
+        except ValueError:
+            raise ValueError(f"Unknown device row label {device!r}.")
+        param_id = (p.param_id or "").strip()
+        if not param_id:
+            raise ValueError(f"Select an analog parameter for device {device!r}.")
+        obj = get_object(document.row_software[row])
+        if param_id not in {spec.param_id for spec in obj.analog_parameters}:
+            raise ValueError(
+                f"Parameter {param_id!r} is not valid for device {device!r} "
+                f"({obj.display_name})."
+            )
+        merged_col = merged_col_for_timestep_label(document, p.timestep_label)
+        if merged_col is None:
+            raise ValueError(
+                f"Unknown timestep {p.timestep_label!r} for {device!r} "
+                "(use a column label on the enabled timeline)."
+            )
+        if merged_enabled_timeline_col_to_block(document, merged_col) is None:
+            raise ValueError(
+                f"Timestep {p.timestep_label!r} is not on an enabled block timeline."
+            )
+        bindings.append(ScanCellBinding(row=row, param_id=param_id, merged_col=merged_col))
+    return tuple(bindings)
+
+
+def build_scan_points(
+    document: SequenceDocument, parameters: tuple[ScanParameter, ...]
+) -> list[ScanPoint]:
+    """
+    Cartesian product of comma-separated value lists; one point per combination.
+    Matrix cells are updated once per point, then the host plays ``repetitions`` shots.
+    """
+    bindings = resolve_scan_bindings(document, parameters)
+    if not bindings:
+        return [ScanPoint(bindings=(), values=())]
+
+    axes: list[list[float]] = []
+    for p in parameters:
+        vals = parse_scan_values(p.values_text)
+        if not vals:
+            raise ValueError(
+                f"Scan parameter {p.device_label!r} / {p.param_id!r} has no values "
+                "(use comma-separated numbers)."
+            )
+        axes.append(vals)
+
+    return [
+        ScanPoint(bindings=bindings, values=tuple(combo))
+        for combo in product(*axes)
+    ]
