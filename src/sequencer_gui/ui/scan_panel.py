@@ -27,7 +27,11 @@ from sequencer_gui.pycam_experiment import (
     shots_seen,
     stop_experiment_if_running,
 )
-from sequencer_gui.scan_plan import build_scan_tags, resolve_scan_bindings
+from sequencer_gui.scan_plan import (
+    build_scan_tags,
+    is_delay_scan_device,
+    resolve_scan_bindings,
+)
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
@@ -351,6 +355,13 @@ class ScanPanel(QGroupBox):
     ) -> str:
         combo.blockSignals(True)
         combo.clear()
+        if is_delay_scan_device(device_label):
+            combo.addItem("Duration (µs)", "time")
+            combo.setCurrentIndex(0)
+            combo.setEnabled(False)
+            combo.blockSignals(False)
+            return "time"
+        combo.setEnabled(True)
         row = self._row_index_for_device_label(device_label)
         param_id = selected_param_id
         if row is not None:
@@ -382,18 +393,30 @@ class ScanPanel(QGroupBox):
         top = QHBoxLayout()
         top.setSpacing(6)
 
+        btn_remove = QPushButton("\u00d7")
+        btn_remove.setFixedSize(22, 22)
+        btn_remove.setFlat(True)
+        btn_remove.setToolTip("Remove parameter")
+        btn_remove.clicked.connect(lambda checked=False, idx=index: self._state.remove_scan_parameter(idx))
+        top.addWidget(btn_remove, 0, Qt.AlignLeft | Qt.AlignVCenter)
+
+        device_labels = list(self._state.document.row_labels)
+        for alias in ("time", "t"):
+            if alias not in device_labels:
+                device_labels.append(alias)
         device_edit = QLineEdit(p.device_label)
-        device_edit.setPlaceholderText("Device")
+        device_edit.setPlaceholderText("Device or time")
         device_edit.setToolTip(
-            "Row label of the device in the sequence. "
+            "Row label of the device in the sequence, or time / t to scan the "
+            "selected timestep duration (µs). "
             "Enter a 0-based row index and press Enter to fill the label."
         )
-        device_edit.setCompleter(
-            QCompleter(QStringListModel(list(self._state.document.row_labels)), device_edit)
-        )
+        device_edit.setCompleter(QCompleter(QStringListModel(device_labels), device_edit))
         param_combo = _NoWheelComboBox()
         param_combo.setMinimumWidth(110)
-        param_combo.setToolTip("Analog parameter of the selected device")
+        param_combo.setToolTip(
+            "Analog parameter of the selected device (fixed to duration when device is time / t)"
+        )
         current_param_id = self._populate_param_combo(param_combo, p.device_label, p.param_id)
         if current_param_id != p.param_id:
             self._state.set_scan_parameter_param_id(index, current_param_id)
@@ -403,7 +426,11 @@ class ScanPanel(QGroupBox):
             dev: QLineEdit = device_edit,
             combo: _NoWheelComboBox = param_combo,
         ) -> None:
-            label = self._device_label_from_field_text(dev.text())
+            raw = dev.text().strip()
+            if is_delay_scan_device(raw):
+                label = raw.lower()
+            else:
+                label = self._device_label_from_field_text(dev.text())
             if label != dev.text().strip():
                 dev.blockSignals(True)
                 dev.setText(label)
@@ -443,18 +470,13 @@ class ScanPanel(QGroupBox):
         timestep_edit.editingFinished.connect(on_timestep_edited)
         top.addWidget(timestep_edit, 0)
 
-        btn_remove = QPushButton("\u00d7")
-        btn_remove.setFixedSize(22, 22)
-        btn_remove.setFlat(True)
-        btn_remove.setToolTip("Remove parameter")
-        btn_remove.clicked.connect(lambda checked=False, idx=index: self._state.remove_scan_parameter(idx))
-        top.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
-
         outer.addLayout(top)
 
         values_edit = QLineEdit(p.values_text)
         values_edit.setPlaceholderText("e.g. 1, 2, 3")
-        values_edit.setToolTip("Comma-separated values for this parameter")
+        values_edit.setToolTip(
+            "Comma-separated values for this parameter (µs when device is time / t)"
+        )
         values_edit.editingFinished.connect(
             lambda idx=index, e=values_edit: self._state.set_scan_parameter_values_text(idx, e.text())
         )

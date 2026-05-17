@@ -26,7 +26,7 @@ COMPLETE_TAB_INDEX = -1
 
 
 class ScanParameter(NamedTuple):
-    """One scanned axis: device row label, analog param id, timestep label, and scan values (parsed when scan runs)."""
+    """One scanned axis: device row label (or time/t for delay), param id, timestep label, values."""
 
     device_label: str
     param_id: str
@@ -90,6 +90,7 @@ class SequenceAppState(QObject):
         self._scan_parameters: tuple[ScanParameter, ...] = ()
         # Cells touched during a scan; restored when the scan ends or is interrupted.
         self._scan_restore: dict[tuple[int, int, str, int], AnalogStored] | None = None
+        self._scan_restore_delays: dict[tuple[int, int], float] | None = None
         self._notify_backend()
         self._backend.sync_run_sequence(False)
 
@@ -262,50 +263,79 @@ class SequenceAppState(QObject):
 
         bindings = resolve_scan_bindings(self._document, self._scan_parameters)
         restore: dict[tuple[int, int, str, int], AnalogStored] = {}
+        restore_delays: dict[tuple[int, int], float] = {}
         for b in bindings:
             resolved = merged_enabled_timeline_col_to_block(self._document, b.merged_col)
             if resolved is None:
                 continue
             bi, local_col = resolved
             block = self._document.blocks[bi]
+            if b.is_delay:
+                key = (bi, local_col)
+                if key not in restore_delays:
+                    restore_delays[key] = block.delays_us.get(local_col, 0.0)
+                continue
             key = (b.row, bi, b.param_id, local_col)
             if key not in restore:
                 restore[key] = block.analog.get((b.row, b.param_id, local_col), "hold")
         self._scan_restore = restore
+        self._scan_restore_delays = restore_delays
 
     def restore_scan_matrix(self) -> None:
-        """Put scan-touched analog cells back to their pre-scan values."""
-        if not self._scan_restore:
+        """Put scan-touched analog cells and delays back to their pre-scan values."""
+        analog_restore = self._scan_restore or {}
+        delay_restore = self._scan_restore_delays or {}
+        if not analog_restore and not delay_restore:
             self._scan_restore = None
+            self._scan_restore_delays = None
             return
         doc = self._document
-        for (row, bi, param_id, local_col), stored in self._scan_restore.items():
+        for (row, bi, param_id, local_col), stored in analog_restore.items():
             block = doc.blocks[bi]
             doc = doc.with_block(
                 bi,
                 block.with_analog(doc.rows, row, param_id, local_col, stored),
             )
+        for (bi, local_col), value_us in delay_restore.items():
+            block = doc.blocks[bi]
+            doc = doc.with_block(bi, block.with_delay_us(local_col, value_us))
         self._scan_restore = None
+        self._scan_restore_delays = None
         if doc is not self._document:
             self._commit_document(doc)
-            self.analog_changed.emit()
+            if analog_restore:
+                self.analog_changed.emit()
+            if delay_restore:
+                self.delays_changed.emit()
 
     def apply_scan_point(self, point: ScanPoint) -> None:
         """Write one scan step into the sequence document (enabled-blocks timeline)."""
         doc = self._document
+        analog_touched = False
+        delays_touched = False
         for binding, value in zip(point.bindings, point.values):
             resolved = merged_enabled_timeline_col_to_block(doc, binding.merged_col)
             if resolved is None:
                 continue
             bi, local_col = resolved
             block = doc.blocks[bi]
-            doc = doc.with_block(
-                bi,
-                block.with_analog(doc.rows, binding.row, binding.param_id, local_col, float(value)),
-            )
+            if binding.is_delay:
+                doc = doc.with_block(bi, block.with_delay_us(local_col, float(value)))
+                delays_touched = True
+            else:
+                doc = doc.with_block(
+                    bi,
+                    block.with_analog(
+                        doc.rows, binding.row, binding.param_id, local_col, float(value)
+                    ),
+                )
+                analog_touched = True
         if doc is not self._document:
             self._commit_document(doc)
-            self.analog_changed.emit()
+            if analog_touched:
+                self.analog_changed.emit()
+            if delays_touched:
+                self.delays_changed.emit()
 
     def build_scan_points(self) -> list:
         from sequencer_gui.scan_plan import build_scan_points

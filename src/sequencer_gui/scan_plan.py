@@ -7,9 +7,22 @@ from dataclasses import dataclass
 from itertools import product
 
 from sequencer_gui.app.state import ScanParameter
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored
 from sequencer_gui.domain.document import SequenceDocument, merge_blocks, merged_enabled_timeline_col_to_block
 from sequencer_gui.software_objects import get_object
+
+# Device field aliases for scanning per-step delay (µs) instead of an analog parameter.
+_DELAY_SCAN_DEVICES = frozenset({"time", "t"})
+_DELAY_SCAN_PARAM_ID = "time"
+
+
+def is_delay_scan_device(device_label: str) -> bool:
+    return device_label.strip().lower() in _DELAY_SCAN_DEVICES
+
+
+def _scan_axis_label(p: ScanParameter) -> str:
+    if is_delay_scan_device(p.device_label):
+        return p.device_label.strip().lower()
+    return f"{p.device_label!r} / {p.param_id!r}"
 
 
 def _format_param_value(value: float) -> str:
@@ -53,10 +66,13 @@ def build_scan_tags(parameters: tuple[ScanParameter, ...], repetitions: int) -> 
         vals = parse_scan_values(p.values_text)
         if not vals:
             raise ValueError(
-                f"Scan parameter {p.device_label!r} / {p.param_id!r} has no values "
+                f"Scan parameter {_scan_axis_label(p)} has no values "
                 "(use comma-separated numbers)."
             )
-        prefix = _sanitize_tag_part(p.param_id or "p")
+        if is_delay_scan_device(p.device_label):
+            prefix = _sanitize_tag_part(p.device_label.strip().lower())
+        else:
+            prefix = _sanitize_tag_part(p.param_id or "p")
         axes.append([(prefix, v) for v in vals])
 
     tags: list[str] = []
@@ -81,6 +97,7 @@ class ScanCellBinding:
     row: int
     param_id: str
     merged_col: int
+    is_delay: bool = False
 
 
 @dataclass(frozen=True)
@@ -119,7 +136,30 @@ def resolve_scan_bindings(
     for p in parameters:
         device = p.device_label.strip()
         if not device:
-            raise ValueError("Each scan parameter needs a device (row label).")
+            raise ValueError(
+                "Each scan parameter needs a device row label, or "
+                f"{' / '.join(sorted(_DELAY_SCAN_DEVICES))} to scan timestep duration."
+            )
+        merged_col = merged_col_for_timestep_label(document, p.timestep_label)
+        if merged_col is None:
+            raise ValueError(
+                f"Unknown timestep {p.timestep_label!r} for {device!r} "
+                "(use a column label on the enabled timeline)."
+            )
+        if merged_enabled_timeline_col_to_block(document, merged_col) is None:
+            raise ValueError(
+                f"Timestep {p.timestep_label!r} is not on an enabled block timeline."
+            )
+        if is_delay_scan_device(device):
+            bindings.append(
+                ScanCellBinding(
+                    row=-1,
+                    param_id=_DELAY_SCAN_PARAM_ID,
+                    merged_col=merged_col,
+                    is_delay=True,
+                )
+            )
+            continue
         try:
             row = document.row_labels.index(device)
         except ValueError:
@@ -132,16 +172,6 @@ def resolve_scan_bindings(
             raise ValueError(
                 f"Parameter {param_id!r} is not valid for device {device!r} "
                 f"({obj.display_name})."
-            )
-        merged_col = merged_col_for_timestep_label(document, p.timestep_label)
-        if merged_col is None:
-            raise ValueError(
-                f"Unknown timestep {p.timestep_label!r} for {device!r} "
-                "(use a column label on the enabled timeline)."
-            )
-        if merged_enabled_timeline_col_to_block(document, merged_col) is None:
-            raise ValueError(
-                f"Timestep {p.timestep_label!r} is not on an enabled block timeline."
             )
         bindings.append(ScanCellBinding(row=row, param_id=param_id, merged_col=merged_col))
     return tuple(bindings)
@@ -163,7 +193,7 @@ def build_scan_points(
         vals = parse_scan_values(p.values_text)
         if not vals:
             raise ValueError(
-                f"Scan parameter {p.device_label!r} / {p.param_id!r} has no values "
+                f"Scan parameter {_scan_axis_label(p)} has no values "
                 "(use comma-separated numbers)."
             )
         axes.append(vals)

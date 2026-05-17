@@ -102,15 +102,15 @@ class MainWindow(QMainWindow):
         while self._tab_bar.count() > 0:
             self._tab_bar.removeTab(0)
         doc = self._state.document
+        self._tab_bar.addTab("Complete")
         for b in doc.blocks:
             self._tab_bar.addTab(b.name)
-        self._tab_bar.addTab("Complete")
         at = self._state.active_tab_index
         n = len(doc.blocks)
         if at == COMPLETE_TAB_INDEX:
-            self._tab_bar.setCurrentIndex(n)
+            self._tab_bar.setCurrentIndex(0)
         else:
-            self._tab_bar.setCurrentIndex(min(at, n - 1))
+            self._tab_bar.setCurrentIndex(min(at + 1, n))
         self._tab_bar.blockSignals(False)
 
     def _sync_tab_selection(self, _active: int) -> None:
@@ -119,18 +119,17 @@ class MainWindow(QMainWindow):
         n = len(doc.blocks)
         at = self._state.active_tab_index
         if at == COMPLETE_TAB_INDEX:
-            self._tab_bar.setCurrentIndex(n)
+            self._tab_bar.setCurrentIndex(0)
         else:
-            self._tab_bar.setCurrentIndex(min(at, n - 1))
+            self._tab_bar.setCurrentIndex(min(at + 1, n))
         self._tab_bar.blockSignals(False)
 
     def _on_tab_changed(self, index: int) -> None:
         self._matrix.reset_horizontal_scroll()
-        n = len(self._state.document.blocks)
-        if index == n:
+        if index == 0:
             self._state.set_active_tab(COMPLETE_TAB_INDEX)
         else:
-            self._state.set_active_tab(index)
+            self._state.set_active_tab(index - 1)
 
     def _update_window_title(self, name: str) -> None:
         self.setWindowTitle(f"{name} — ArtiQ experimental sequencer")
