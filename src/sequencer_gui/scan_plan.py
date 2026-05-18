@@ -14,6 +14,10 @@ from sequencer_gui.software_objects import get_object
 _DELAY_SCAN_DEVICES = frozenset({"time", "t"})
 _DELAY_SCAN_PARAM_ID = "time"
 
+# Tag layout: ``device+param+value`` per axis, axes joined with ``;`` (Windows-safe paths).
+_SCAN_TAG_PART_SEP = "+"
+_SCAN_TAG_AXIS_SEP = ";"
+
 
 def is_delay_scan_device(device_label: str) -> bool:
     return device_label.strip().lower() in _DELAY_SCAN_DEVICES
@@ -35,6 +39,17 @@ def _sanitize_tag_part(text: str) -> str:
     text = str(text).strip()
     text = re.sub(r"[^\w.-]", "_", text)
     return text.strip("._") or "p"
+
+
+def _scan_tag_segment(p: ScanParameter, value: float) -> str:
+    """One axis: ``device+param+value`` (e.g. ``AOM_Tweezers+amplitude+0.3``)."""
+    device = _sanitize_tag_part(p.device_label)
+    val = _format_param_value(value)
+    if is_delay_scan_device(p.device_label):
+        param = _sanitize_tag_part(_DELAY_SCAN_PARAM_ID)
+    else:
+        param = _sanitize_tag_part(p.param_id or "p")
+    return _SCAN_TAG_PART_SEP.join((device, param, val))
 
 
 def parse_scan_values(values_text: str) -> list[float]:
@@ -61,7 +76,7 @@ def build_scan_tags(parameters: tuple[ScanParameter, ...], repetitions: int) -> 
     if not parameters:
         return [f"rep_{i + 1}" for i in range(reps)]
 
-    axes: list[list[tuple[str, float]]] = []
+    axes: list[list[float]] = []
     for p in parameters:
         vals = parse_scan_values(p.values_text)
         if not vals:
@@ -69,15 +84,13 @@ def build_scan_tags(parameters: tuple[ScanParameter, ...], repetitions: int) -> 
                 f"Scan parameter {_scan_axis_label(p)} has no values "
                 "(use comma-separated numbers)."
             )
-        if is_delay_scan_device(p.device_label):
-            prefix = _sanitize_tag_part(p.device_label.strip().lower())
-        else:
-            prefix = _sanitize_tag_part(p.param_id or "p")
-        axes.append([(prefix, v) for v in vals])
+        axes.append(vals)
 
     tags: list[str] = []
     for combo in product(*axes):
-        base = "_".join(f"{pid}_{_format_param_value(v)}" for pid, v in combo)
+        base = _SCAN_TAG_AXIS_SEP.join(
+            _scan_tag_segment(parameters[i], v) for i, v in enumerate(combo)
+        )
         if reps == 1:
             tags.append(base)
         else:
