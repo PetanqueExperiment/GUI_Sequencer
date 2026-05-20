@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
 
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD
+from sequencer_gui.domain.document import MergedBlockSpan
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.software_objects.types import AnalogParameterSpec
@@ -31,6 +32,152 @@ _ROW_CHECKED_COLORS = (
     "#bcbd22",
     "#17becf",
 )
+
+
+def _hex_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def default_block_accent_color(block_index: int) -> str:
+    return _ROW_CHECKED_COLORS[block_index % len(_ROW_CHECKED_COLORS)]
+
+
+def resolve_block_accent_color(block_index: int, accent_color: str | None) -> str:
+    if accent_color:
+        from PyQt5.QtGui import QColor
+
+        c = QColor(accent_color)
+        if c.isValid():
+            return c.name()
+    return default_block_accent_color(block_index)
+
+
+def block_column_tint_stylesheet(accent: str, *, block_separator: bool = False) -> str:
+    r, g, b = _hex_rgb(accent)
+    parts = [f"background-color: rgba({r}, {g}, {b}, 0.11);"]
+    if block_separator:
+        parts.append(f"border-left: 2px solid {accent};")
+    return " ".join(parts)
+
+
+def block_band_stylesheet(accent: str) -> str:
+    r, g, b = _hex_rgb(accent)
+    return (
+        f"background-color: rgba({r}, {g}, {b}, 0.38);"
+        "color: #263238; font-size: 10px; font-weight: 600;"
+        "padding: 2px 4px; border-radius: 3px;"
+    )
+
+
+def block_swatch_stylesheet(accent: str) -> str:
+    return (
+        "QPushButton {"
+        f" background-color: {accent};"
+        " border: 1px solid #546e7a;"
+        " border-radius: 4px;"
+        " min-width: 0; min-height: 0;"
+        " }"
+        "QPushButton:hover { border: 1px solid #263238; }"
+    )
+
+
+def sequence_tab_bar_stylesheet(
+    blocks: tuple[object, ...],
+) -> str:
+    """Stylesheet for the Complete + per-block ``QTabBar`` (``blocks`` need ``enabled``, ``accent_color``)."""
+    parts = [
+        "QTabBar::tab {"
+        " min-width: 72px; padding: 6px 12px; margin-right: 2px;"
+        " }",
+        "QTabBar::tab:!selected { margin-top: 2px; }",
+        "QTabBar::tab:selected { margin-top: 0px; font-weight: 600; }",
+        "QTabBar::tab:first {"
+        " background-color: #eceff1; color: #37474f;"
+        " border: 1px solid #b0bec5; border-bottom: none;"
+        " border-top-left-radius: 4px; border-top-right-radius: 4px;"
+        " }",
+        "QTabBar::tab:first:selected { background-color: #cfd8dc; }",
+    ]
+    for i, b in enumerate(blocks):
+        n = i + 2
+        accent = resolve_block_accent_color(i, getattr(b, "accent_color", None))
+        r, g, bl = _hex_rgb(accent)
+        enabled = bool(b.enabled)
+        bg = 0.36 if enabled else 0.14
+        sel_bg = 0.5 if enabled else 0.22
+        border = accent if enabled else "#b0bec5"
+        parts.append(
+            f"QTabBar::tab:nth-child({n}) {{"
+            f" background-color: rgba({r}, {g}, {bl}, {bg});"
+            f" color: #263238;"
+            f" border: 2px solid {border}; border-bottom: none;"
+            " border-top-left-radius: 4px; border-top-right-radius: 4px;"
+            " }"
+        )
+        parts.append(
+            f"QTabBar::tab:nth-child({n}):selected {{"
+            f" background-color: rgba({r}, {g}, {bl}, {sel_bg});"
+            " }"
+        )
+    return "\n".join(parts)
+
+
+def block_strip_card_stylesheet(accent: str, *, enabled: bool) -> str:
+    r, g, b = _hex_rgb(accent)
+    bg_alpha = 0.32 if enabled else 0.14
+    border = accent if enabled else "#b0bec5"
+    return (
+        "QFrame {"
+        f" background-color: rgba({r}, {g}, {b}, {bg_alpha});"
+        f" border: 2px solid {border};"
+        " border-radius: 6px;"
+        " }"
+    )
+
+
+def block_span_width_px(ncol: int) -> int:
+    return ncol * STEP_COLUMN_WIDTH_PX + max(0, ncol - 1) * GRID_H_SPACING_PX
+
+
+def column_block_indices_from_spans(
+    ncol: int,
+    spans: tuple[MergedBlockSpan, ...],
+) -> tuple[int, ...] | None:
+    """Map each merged column to its ``block_index``; ``None`` when there is nothing to show."""
+    if not spans:
+        return None
+    indices = [0] * ncol
+    for span in spans:
+        start = span.merged_start_col
+        bi = span.block_index
+        for i in range(span.ncol):
+            indices[start + i] = bi
+    return tuple(indices)
+
+
+def column_block_accents_from_spans(
+    ncol: int,
+    spans: tuple[MergedBlockSpan, ...],
+    blocks: tuple[object, ...],
+) -> tuple[str, ...] | None:
+    if not spans:
+        return None
+    accents = [default_block_accent_color(0)] * ncol
+    for span in spans:
+        accent = resolve_block_accent_color(
+            span.block_index, getattr(blocks[span.block_index], "accent_color", None)
+        )
+        for i in range(span.ncol):
+            accents[span.merged_start_col + i] = accent
+    return tuple(accents)
+
+
+def is_block_column_start(col: int, block_indices: tuple[int, ...]) -> bool:
+    if col <= 0 or col >= len(block_indices):
+        return col == 0
+    return block_indices[col] != block_indices[col - 1]
+
 
 # One timeline step: delay spin, optional per-device on/off toggle, analog line edit (same width every row).
 STEP_COLUMN_WIDTH_PX = 72
@@ -111,9 +258,14 @@ class DeviceRowWidget:
         state: SequenceAppState,
         model: SequenceModel,
         parent: QWidget | None = None,
+        *,
+        column_block_indices: tuple[int, ...] | None = None,
+        column_block_accents: tuple[str, ...] | None = None,
     ) -> None:
         self._row = row
         self._state = state
+        self._column_block_indices = column_block_indices
+        self._column_block_accents = column_block_accents
         self._buttons: list[QPushButton] = []
         self._analog_edits: list[list[AnalogValueLineEdit]] = []
         self._param_sig: tuple[str, ...] = ()
@@ -218,6 +370,21 @@ class DeviceRowWidget:
             for ed in row:
                 ed.setEnabled(not read_only)
 
+    def _apply_block_column_hint(self, widget: QWidget, col: int) -> None:
+        if self._column_block_accents is None or col >= len(self._column_block_accents):
+            return
+        accent = self._column_block_accents[col]
+        block_separator = False
+        if self._column_block_indices is not None and col < len(self._column_block_indices):
+            bi = self._column_block_indices[col]
+            block_separator = (
+                is_block_column_start(col, self._column_block_indices) and bi > 0
+            )
+        widget.setStyleSheet(
+            widget.styleSheet()
+            + block_column_tint_stylesheet(accent, block_separator=block_separator)
+        )
+
     @property
     def logical_row(self) -> int:
         return self._row
@@ -255,6 +422,7 @@ class DeviceRowWidget:
                 return on_toggled
 
             btn.toggled.connect(make_toggle(self._row, c))
+            self._apply_block_column_hint(btn, c)
             self._buttons.append(btn)
             self._steps_grid.addWidget(btn, 0, c, 1, 1)
 
@@ -348,6 +516,7 @@ class DeviceRowWidget:
 
                 ed.set_on_return(make_return(ed, spec, c))
                 ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                self._apply_block_column_hint(ed, c)
                 self._steps_grid.addWidget(ed, g_row, c)
                 edits_row.append(ed)
                 self._analog_row_widgets.append(ed)

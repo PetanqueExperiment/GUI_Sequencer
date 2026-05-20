@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, NamedTuple, Tuple
 
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
 from sequencer_gui.domain.model import SequenceModel
@@ -19,6 +19,7 @@ class SequenceBlock:
     delays_us: Dict[int, float] = field(default_factory=dict)
     analog: Dict[Tuple[int, str, int], AnalogStored] = field(default_factory=dict)
     col_labels: Tuple[str, ...] = field(default_factory=tuple)
+    accent_color: str | None = None
 
     def __post_init__(self) -> None:
         if self.cols < 1:
@@ -32,72 +33,47 @@ class SequenceBlock:
     def col_label(self, col: int) -> str:
         return self.col_labels[col]
 
-    def with_name(self, name: str) -> SequenceBlock:
+    def _copy(self, **kwargs: object) -> SequenceBlock:
         return SequenceBlock(
-            name=name,
-            enabled=self.enabled,
-            cols=self.cols,
-            channels=dict(self.channels),
-            delays_us=dict(self.delays_us),
-            analog=dict(self.analog),
-            col_labels=self.col_labels,
+            name=kwargs.get("name", self.name),  # type: ignore[arg-type]
+            enabled=kwargs.get("enabled", self.enabled),  # type: ignore[arg-type]
+            cols=kwargs.get("cols", self.cols),  # type: ignore[arg-type]
+            channels=kwargs.get("channels", self.channels),  # type: ignore[arg-type]
+            delays_us=kwargs.get("delays_us", self.delays_us),  # type: ignore[arg-type]
+            analog=kwargs.get("analog", self.analog),  # type: ignore[arg-type]
+            col_labels=kwargs.get("col_labels", self.col_labels),  # type: ignore[arg-type]
+            accent_color=kwargs.get("accent_color", self.accent_color),  # type: ignore[arg-type]
         )
 
+    def with_name(self, name: str) -> SequenceBlock:
+        return self._copy(name=name)
+
     def with_enabled(self, enabled: bool) -> SequenceBlock:
-        return SequenceBlock(
-            name=self.name,
-            enabled=enabled,
-            cols=self.cols,
-            channels=dict(self.channels),
-            delays_us=dict(self.delays_us),
-            analog=dict(self.analog),
-            col_labels=self.col_labels,
-        )
+        return self._copy(enabled=enabled)
+
+    def with_accent_color(self, accent_color: str | None) -> SequenceBlock:
+        return self._copy(accent_color=accent_color)
 
     def with_channel(self, rows: int, row: int, col: int, on: bool) -> SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
             raise IndexError("channel index out of range")
         new = dict(self.channels)
         new[(row, col)] = on
-        return SequenceBlock(
-            name=self.name,
-            enabled=self.enabled,
-            cols=self.cols,
-            channels=new,
-            delays_us=dict(self.delays_us),
-            analog=dict(self.analog),
-            col_labels=self.col_labels,
-        )
+        return self._copy(channels=new)
 
     def with_delay_us(self, col: int, value_us: float) -> SequenceBlock:
         if not (0 <= col < self.cols):
             raise IndexError("delay column out of range")
         d = dict(self.delays_us)
         d[col] = value_us
-        return SequenceBlock(
-            name=self.name,
-            enabled=self.enabled,
-            cols=self.cols,
-            channels=dict(self.channels),
-            delays_us=d,
-            analog=dict(self.analog),
-            col_labels=self.col_labels,
-        )
+        return self._copy(delays_us=d)
 
     def with_col_label(self, col: int, text: str) -> SequenceBlock:
         if not (0 <= col < self.cols):
             raise IndexError("column index out of range")
         lst = list(self.col_labels)
         lst[col] = text
-        return SequenceBlock(
-            name=self.name,
-            enabled=self.enabled,
-            cols=self.cols,
-            channels=dict(self.channels),
-            delays_us=dict(self.delays_us),
-            analog=dict(self.analog),
-            col_labels=tuple(lst),
-        )
+        return self._copy(col_labels=tuple(lst))
 
     def with_analog(self, rows: int, row: int, param_id: str, col: int, value: AnalogStored) -> SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
@@ -106,21 +82,11 @@ class SequenceBlock:
         a[(row, param_id, col)] = (
             ANALOG_HOLD if is_holdish(value) else float(value)  # type: ignore[arg-type]
         )
-        return SequenceBlock(
-            name=self.name,
-            enabled=self.enabled,
-            cols=self.cols,
-            channels=dict(self.channels),
-            delays_us=dict(self.delays_us),
-            analog=a,
-            col_labels=self.col_labels,
-        )
+        return self._copy(analog=a)
 
     def with_timeline_from_model(self, model: SequenceModel) -> SequenceBlock:
         """Replace timeline fields from a full model (rows/software/labels ignored)."""
-        return SequenceBlock(
-            name=self.name,
-            enabled=self.enabled,
+        return self._copy(
             cols=model.cols,
             channels=dict(model.channels),
             delays_us=dict(model.delays_us),
@@ -221,15 +187,7 @@ class SequenceDocument:
                 for c in range(b.cols):
                     ch.pop((row, c), None)
             new_blocks.append(
-                SequenceBlock(
-                    name=b.name,
-                    enabled=b.enabled,
-                    cols=b.cols,
-                    channels=ch,
-                    delays_us=dict(b.delays_us),
-                    analog=a,
-                    col_labels=b.col_labels,
-                )
+                b._copy(channels=ch, analog=a)
             )
         return SequenceDocument(
             rows=self.rows,
@@ -298,6 +256,25 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
         row_labels=doc.row_labels,
         row_software=doc.row_software,
     )
+
+
+class MergedBlockSpan(NamedTuple):
+    merged_start_col: int
+    ncol: int
+    block_index: int
+    name: str
+
+
+def merged_enabled_block_spans(doc: SequenceDocument) -> tuple[MergedBlockSpan, ...]:
+    """Column ranges per enabled block in the merged Complete timeline."""
+    spans: list[MergedBlockSpan] = []
+    col_off = 0
+    for bi, b in enumerate(doc.blocks):
+        if not b.enabled:
+            continue
+        spans.append(MergedBlockSpan(col_off, b.cols, bi, b.name))
+        col_off += b.cols
+    return tuple(spans)
 
 
 def merged_timeline_col_offset_for_block(doc: SequenceDocument, block_index: int) -> int:

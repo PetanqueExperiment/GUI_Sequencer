@@ -132,7 +132,7 @@ class SequenceFileError(ValueError):
 
 def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str, Any]:
     rows = document.rows
-    return {
+    payload: dict[str, Any] = {
         "name": block.name,
         "enabled": block.enabled,
         "cols": block.cols,
@@ -140,6 +140,9 @@ def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str
         "col_labels": [block.col_label(c) for c in range(block.cols)],
         "device_rows": _device_rows_from_block(block, rows, document.row_software),
     }
+    if block.accent_color:
+        payload["accent_color"] = block.accent_color
+    return payload
 
 
 def document_to_payload(document: SequenceDocument) -> dict[str, Any]:
@@ -179,6 +182,9 @@ def _block_from_payload(
     else:
         col_labels = ()
 
+    raw_accent = data.get("accent_color")
+    accent_color = str(raw_accent) if raw_accent else None
+
     return SequenceBlock(
         name=name,
         enabled=enabled,
@@ -187,6 +193,7 @@ def _block_from_payload(
         delays_us=delays_us,
         analog=analog,
         col_labels=col_labels,
+        accent_color=accent_color,
     )
 
 

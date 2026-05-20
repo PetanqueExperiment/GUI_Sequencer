@@ -17,12 +17,23 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
-from sequencer_gui.domain.document import merged_timeline_col_offset_for_block
+from sequencer_gui.domain.document import (
+    MergedBlockSpan,
+    merged_enabled_block_spans,
+    merged_timeline_col_offset_for_block,
+)
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.ui.device_row import (
     GRID_H_SPACING_PX,
     STEP_COLUMN_WIDTH_PX,
     DeviceRowWidget,
+    block_band_stylesheet,
+    block_column_tint_stylesheet,
+    block_span_width_px,
+    column_block_accents_from_spans,
+    column_block_indices_from_spans,
+    is_block_column_start,
+    resolve_block_accent_color,
     timeline_steps_width_px,
 )
 from sequencer_gui.ui.row_software_selector import LABEL_COL_MIN_WIDTH_PX
@@ -34,6 +45,7 @@ _STEP_GROUP_GAP_PX = 4
 _MATRIX_MIN_WIDTH_EXTRA_PX = 48
 # Fallback when layout has not resolved line-edit height yet.
 _INDEX_ROW_MIN_HEIGHT_PX = 20
+_BLOCK_BAND_ROW_MIN_HEIGHT_PX = 20
 _LABEL_ROW_MIN_HEIGHT_PX = 24
 _TIME_ROW_MIN_HEIGHT_PX = 28
 
@@ -46,14 +58,39 @@ def _format_delay_us(v: float) -> str:
     return format(v, f".{_DELAY_DECIMALS}f")
 
 
-def _make_timestep_index_label(col: int) -> QLabel:
+def _make_timestep_index_label(
+    col: int,
+    *,
+    accent: str | None = None,
+    block_separator: bool = False,
+) -> QLabel:
     lab = QLabel(str(col))
     lab.setAlignment(Qt.AlignCenter)
     lab.setFixedWidth(STEP_COLUMN_WIDTH_PX)
     lab.setFixedHeight(_INDEX_ROW_MIN_HEIGHT_PX)
     lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-    lab.setStyleSheet("color: #78909c; font-size: 11px;")
+    style = "color: #78909c; font-size: 11px;"
+    if accent is not None:
+        style += " " + block_column_tint_stylesheet(accent, block_separator=block_separator)
+    lab.setStyleSheet(style)
     return lab
+
+
+def _make_block_band_label(name: str, accent: str, ncol: int) -> QLabel:
+    lab = QLabel(name)
+    lab.setAlignment(Qt.AlignCenter)
+    lab.setFixedHeight(_BLOCK_BAND_ROW_MIN_HEIGHT_PX)
+    lab.setMinimumWidth(block_span_width_px(ncol))
+    lab.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    lab.setStyleSheet(block_band_stylesheet(accent))
+    lab.setToolTip(name)
+    return lab
+
+
+def _apply_block_column_hint(widget: QWidget, accent: str, *, block_separator: bool) -> None:
+    widget.setStyleSheet(
+        widget.styleSheet() + block_column_tint_stylesheet(accent, block_separator=block_separator)
+    )
 
 
 def min_width_for_timeline_cols(_cols: int) -> int:
@@ -182,6 +219,7 @@ class ChannelMatrix(QGroupBox):
         self._built_rows = -1
         self._built_cols = -1
         self._built_tab = -2
+        self._built_block_band_sig: tuple[tuple[int, int, str], ...] = ()
         self._corner_block: QWidget | None = None
         self._labels_panel: _ScrollPanel | None = None
         self._timeline_panel: _TimelinePanel | None = None
@@ -197,6 +235,7 @@ class ChannelMatrix(QGroupBox):
 
         self._build_content(self._state.model)
         state.model_changed.connect(self._sync_from_model)
+        state.document_changed.connect(self._on_document_changed)
         state.active_tab_changed.connect(self._on_active_tab_changed)
 
     def commit_row_labels_to_model(self) -> None:
@@ -400,6 +439,36 @@ class ChannelMatrix(QGroupBox):
             return 0
         return merged_timeline_col_offset_for_block(self._state.document, tab)
 
+    def _timeline_block_spans(self, model: SequenceModel) -> tuple[MergedBlockSpan, ...]:
+        tab = self._state.active_tab_index
+        doc = self._state.document
+        if tab == COMPLETE_TAB_INDEX:
+            return merged_enabled_block_spans(doc)
+        if 0 <= tab < len(doc.blocks):
+            b = doc.blocks[tab]
+            return (MergedBlockSpan(0, model.cols, tab, b.name),)
+        return ()
+
+    def _block_band_signature(self) -> tuple[tuple[int, int, str, str | None], ...]:
+        doc = self._state.document
+        return tuple(
+            (
+                s.block_index,
+                s.ncol,
+                s.name,
+                doc.blocks[s.block_index].accent_color if s.block_index < len(doc.blocks) else None,
+            )
+            for s in self._timeline_block_spans(self._state.model)
+        )
+
+    def _column_block_indices(self, model: SequenceModel) -> tuple[int, ...] | None:
+        return column_block_indices_from_spans(model.cols, self._timeline_block_spans(model))
+
+    def _column_block_accents(self, model: SequenceModel) -> tuple[str, ...] | None:
+        return column_block_accents_from_spans(
+            model.cols, self._timeline_block_spans(model), self._state.document.blocks
+        )
+
     def _build_time_steps(self, model: SequenceModel) -> int:
         self._time_steps = QWidget()
         ts_grid = QGridLayout(self._time_steps)
@@ -410,9 +479,45 @@ class ChannelMatrix(QGroupBox):
             ts_grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
             ts_grid.setColumnStretch(col, 0)
 
+        spans = self._timeline_block_spans(model)
+        block_indices = self._column_block_indices(model)
+        block_accents = self._column_block_accents(model)
+        doc = self._state.document
+        show_block_band = bool(spans)
+        index_row = 1 if show_block_band else 0
+        label_row = index_row + 1
+        delay_row = label_row + 1
+        gap_row = delay_row + 1
+
+        if show_block_band:
+            for span in spans:
+                accent = resolve_block_accent_color(
+                    span.block_index, doc.blocks[span.block_index].accent_color
+                )
+                ts_grid.addWidget(
+                    _make_block_band_label(span.name, accent, span.ncol),
+                    0,
+                    span.merged_start_col,
+                    1,
+                    span.ncol,
+                )
+
         col_index_offset = self._timeline_column_index_offset()
         for c in range(model.cols):
-            ts_grid.addWidget(_make_timestep_index_label(col_index_offset + c), 0, c)
+            accent = block_accents[c] if block_accents is not None else None
+            block_separator = False
+            if block_indices is not None and accent is not None:
+                bi = block_indices[c]
+                block_separator = is_block_column_start(c, block_indices) and bi > 0
+            ts_grid.addWidget(
+                _make_timestep_index_label(
+                    col_index_offset + c,
+                    accent=accent,
+                    block_separator=block_separator,
+                ),
+                index_row,
+                c,
+            )
 
             label_ed = QLineEdit(model.col_label(c))
             label_ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
@@ -422,7 +527,9 @@ class ChannelMatrix(QGroupBox):
             )
             self._col_label_edits.append(label_ed)
             label_ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            ts_grid.addWidget(label_ed, 1, c)
+            if accent is not None:
+                _apply_block_column_hint(label_ed, accent, block_separator=block_separator)
+            ts_grid.addWidget(label_ed, label_row, c)
 
             ed = CommitFloatLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
             ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
@@ -437,19 +544,25 @@ class ChannelMatrix(QGroupBox):
             ed.set_on_return(make_return(c))
             self._delay_edits.append(ed)
             ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            ts_grid.addWidget(ed, 2, c)
+            if accent is not None:
+                _apply_block_column_hint(ed, accent, block_separator=block_separator)
+            ts_grid.addWidget(ed, delay_row, c)
 
         steps_time_gap = QWidget()
         steps_time_gap.setFixedHeight(_TIME_AFTER_GAP_PX)
         steps_time_gap.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        ts_grid.addWidget(steps_time_gap, 3, 0, 1, model.cols)
+        ts_grid.addWidget(steps_time_gap, gap_row, 0, 1, model.cols)
 
         self._time_steps.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._time_steps.adjustSize()
         steps_w = max(timeline_steps_width_px(model.cols), self._time_steps.sizeHint().width())
+        band_extra = (
+            (_BLOCK_BAND_ROW_MIN_HEIGHT_PX + _PAIR_V_SPACING_PX) if show_block_band else 0
+        )
         time_h = max(
             self._time_steps.sizeHint().height(),
-            _INDEX_ROW_MIN_HEIGHT_PX
+            band_extra
+            + _INDEX_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
             + _LABEL_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
@@ -467,6 +580,9 @@ class ChannelMatrix(QGroupBox):
         self._built_rows = model.rows
         self._built_cols = model.cols
         self._built_tab = self._state.active_tab_index
+        self._built_block_band_sig = self._block_band_signature()
+        block_indices = self._column_block_indices(model)
+        block_accents = self._column_block_accents(model)
 
         self._corner_block = QWidget()
         self._corner_block.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
@@ -474,6 +590,14 @@ class ChannelMatrix(QGroupBox):
         corner_lay = QVBoxLayout(self._corner_block)
         corner_lay.setContentsMargins(0, 0, 0, 0)
         corner_lay.setSpacing(_PAIR_V_SPACING_PX)
+        if self._built_block_band_sig:
+            corner_block = QLabel("Block")
+            corner_block.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            corner_block.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+            corner_block.setFixedHeight(_BLOCK_BAND_ROW_MIN_HEIGHT_PX)
+            corner_block.setStyleSheet("color: #78909c; font-size: 11px;")
+            corner_block.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            corner_lay.addWidget(corner_block)
         corner_index = QLabel("#")
         corner_index.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         corner_index.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
@@ -512,7 +636,14 @@ class ChannelMatrix(QGroupBox):
         steps_lay.setSpacing(_PAIR_V_SPACING_PX)
 
         for r in range(model.rows):
-            dr = DeviceRowWidget(r, state=self._state, model=model, parent=labels_host)
+            dr = DeviceRowWidget(
+                r,
+                state=self._state,
+                model=model,
+                parent=labels_host,
+                column_block_indices=block_indices,
+                column_block_accents=block_accents,
+            )
             self._device_rows.append(dr)
             labels_lay.addWidget(dr.label_panel(), 0, Qt.AlignLeft)
             steps_lay.addWidget(dr.steps_panel(), 0, Qt.AlignLeft)
@@ -584,6 +715,9 @@ class ChannelMatrix(QGroupBox):
         self.updateGeometry()
         QTimer.singleShot(0, self._after_layout)
 
+    def _on_document_changed(self, _document) -> None:
+        self._rebuild_for_current_view()
+
     def _on_active_tab_changed(self, _tab: int) -> None:
         self._build_content(self._state.model)
 
@@ -594,6 +728,7 @@ class ChannelMatrix(QGroupBox):
             or model.cols != self._built_cols
             or len(self._delay_edits) != model.cols
             or len(self._col_label_edits) != model.cols
+            or self._block_band_signature() != self._built_block_band_sig
         ):
             self._build_content(model)
             return

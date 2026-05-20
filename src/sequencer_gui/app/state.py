@@ -449,6 +449,14 @@ class SequenceAppState(QObject):
             return
         self._commit_document(self._document.with_block(block_index, b.with_enabled(enabled)))
 
+    def set_block_accent_color(self, block_index: int, accent_color: str | None) -> None:
+        if not (0 <= block_index < len(self._document.blocks)):
+            raise IndexError("block index out of range")
+        b = self._document.blocks[block_index]
+        if b.accent_color == accent_color:
+            return
+        self._commit_document(self._document.with_block(block_index, b.with_accent_color(accent_color)))
+
     def move_block(self, from_index: int, to_index: int) -> None:
         if from_index == to_index:
             return

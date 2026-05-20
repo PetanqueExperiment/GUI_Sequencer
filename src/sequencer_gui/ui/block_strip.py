@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QCursor
+from PyQt5.QtGui import QColor, QCursor
 from PyQt5.QtWidgets import (
     QApplication,
+    QColorDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -17,6 +19,11 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
+from sequencer_gui.ui.device_row import (
+    block_strip_card_stylesheet,
+    block_swatch_stylesheet,
+    resolve_block_accent_color,
+)
 
 
 class _DragHandle(QLabel):
@@ -140,7 +147,7 @@ class BlockStripWidget(QGroupBox):
     """Between toolbar and tabs: per-block name, ON/OFF, add block, drag to reorder."""
 
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
-        super().__init__("Timeline blocks", parent)
+        super().__init__("Block Timeline", parent)
         self._state = state
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -183,8 +190,10 @@ class BlockStripWidget(QGroupBox):
         frames: list[QFrame] = []
         for i in range(len(doc.blocks)):
             b = doc.blocks[i]
+            accent = resolve_block_accent_color(i, b.accent_color)
             frame = QFrame()
             frame.setFrameShape(QFrame.StyledPanel)
+            frame.setStyleSheet(block_strip_card_stylesheet(accent, enabled=b.enabled))
             frames.append(frame)
             outer = QVBoxLayout(frame)
             outer.setContentsMargins(8, 4, 8, 4)
@@ -195,6 +204,38 @@ class BlockStripWidget(QGroupBox):
 
             handle = _DragHandle(i, self._canvas)
             row_name.addWidget(handle)
+
+            btn_color = QPushButton()
+            btn_color.setFixedSize(22, 22)
+            btn_color.setToolTip("Choose block color (right-click to reset)")
+            btn_color.setStyleSheet(block_swatch_stylesheet(accent))
+            btn_color.setCursor(Qt.PointingHandCursor)
+
+            def make_pick_color(ii: int, button: QPushButton, card: QFrame):
+                def on_clicked() -> None:
+                    current = QColor(
+                        resolve_block_accent_color(ii, self._state.document.blocks[ii].accent_color)
+                    )
+                    chosen = QColorDialog.getColor(current, card, "Block color")
+                    if chosen.isValid():
+                        self._state.set_block_accent_color(ii, chosen.name())
+
+                return on_clicked
+
+            def make_color_menu(ii: int):
+                def show_menu(pos) -> None:
+                    menu = QMenu()
+                    reset = menu.addAction("Reset to default color")
+                    picked = menu.exec_(btn_color.mapToGlobal(pos))
+                    if picked is reset:
+                        self._state.set_block_accent_color(ii, None)
+
+                return show_menu
+
+            btn_color.clicked.connect(make_pick_color(i, btn_color, frame))
+            btn_color.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn_color.customContextMenuRequested.connect(make_color_menu(i))
+            row_name.addWidget(btn_color)
 
             edit = QLineEdit(b.name)
             edit.setMinimumWidth(100)
