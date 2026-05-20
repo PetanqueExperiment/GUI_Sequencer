@@ -58,7 +58,7 @@ class ScanPanel(QGroupBox):
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__("Scan", parent)
         self._state = state
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 10, 12, 10)
@@ -102,6 +102,7 @@ class ScanPanel(QGroupBox):
         self._btn_interrupt.clicked.connect(self._on_interrupt)
         scan_actions.addWidget(self._btn_interrupt)
         controls.addLayout(scan_actions)
+        controls.addStretch(1)
 
         row.addLayout(controls, 0)
 
@@ -115,6 +116,7 @@ class ScanPanel(QGroupBox):
         self._cards_scroll.setWidgetResizable(True)
         self._cards_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._cards_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._cards_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._cards_scroll.setWidget(self._cards_host)
         row.addWidget(self._cards_scroll, 1)
 

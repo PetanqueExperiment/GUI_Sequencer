@@ -43,7 +43,7 @@ def _load_initial_sequence() -> tuple[object, str]:
             else:
                 if validate_document_for_ui(loaded) is None:
                     document = loaded
-                    sequence_name = p.name
+                    sequence_name = str(p.resolve())
     return document, sequence_name
 
 

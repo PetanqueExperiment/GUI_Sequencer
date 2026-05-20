@@ -25,6 +25,18 @@ HERO_INSTANCE_NAME = "Sequencer_HERO"
 # PyCam for Petanque (:class:`PyCam_HERO.PyCam_HERO` in the camera GUI process).
 PYCAM_HERO_INSTANCE_NAME = "PyCam_HERO"
 
+# ARTIQ master scheduler (:class:`atomiq.frontend.atomiq_master.Scheduler` LocalHERO).
+ATOMIQ_SCHEDULER_HERO_NAME = "atomiq-scheduler"
+
+# ARTIQ experiment database (:class:`atomiq.frontend.atomiq_master.ExperimentDB` LocalHERO).
+ATOMIQ_EXPERIMENTDB_HERO_NAME = "atomiq-experimentdb"
+
+# ``list_experiments()`` key for the sequencer-mode experiment (``Sequencer_mode.py``).
+ATOMIQ_SEQUENCER_MODE_EXPERIMENT_KEY = "Sequencer_mode.py"
+
+# Default ARTIQ pipeline for :meth:`Scheduler.submit`.
+ATOMIQ_DEFAULT_PIPELINE = "main"
+
 # PyCam repo for live sequence run/pause (not a user scan).
 PYCAM_LIVE_EXPERIMENT_NAME = "Running_without_scan"
 

@@ -34,7 +34,7 @@ class SequenceToolbar(QGroupBox):
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__("Sequence", parent)
         self._state = state
-        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 10, 12, 10)
@@ -42,11 +42,11 @@ class SequenceToolbar(QGroupBox):
 
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
-        name_row.addWidget(QLabel("Name:"))
+        name_row.addWidget(QLabel("File:"))
         self._name = QLineEdit(state.sequence_name)
-        self._name.setPlaceholderText("Sequence name")
-        self._name.setMinimumWidth(200)
-        self._name.setMaximumWidth(360)
+        self._name.setPlaceholderText("Sequence file (.json)")
+        self._name.setMinimumWidth(280)
+        self._name.setToolTip("Saved sequence path, or a name before the first save.")
         self._name.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._name.editingFinished.connect(self._on_name_edited)
         name_row.addWidget(self._name, 1)
@@ -91,6 +91,7 @@ class SequenceToolbar(QGroupBox):
         actions_row.addWidget(btn_load)
         actions_row.addStretch(1)
         outer.addLayout(actions_row)
+        outer.addStretch(1)
 
         state.sequence_name_changed.connect(self._on_sequence_name_changed)
         state.document_changed.connect(self._refresh_timing)
@@ -156,23 +157,46 @@ class SequenceToolbar(QGroupBox):
     def _on_name_edited(self) -> None:
         self._state.set_sequence_name(self._name.text())
 
+    @staticmethod
+    def _name_for_json_file(raw: str) -> str:
+        text = raw.strip()
+        if not text:
+            return "Untitled"
+        p = Path(text)
+        if p.suffix.lower() == ".json":
+            return p.stem or "Untitled"
+        return text
+
+    def _save_dialog_initial_path(self, default_stem: str) -> str:
+        raw = self._name.text().strip()
+        if raw:
+            p = Path(raw)
+            if p.suffix.lower() == ".json":
+                if p.is_file():
+                    return str(p.resolve())
+                parent = p.parent if p.parent != Path(".") else Path.home()
+                return str(parent / p.name)
+        safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in default_stem)[:80]
+        return str(Path.home() / f"{safe}.json")
+
     def _on_save(self) -> None:
-        self._state.set_sequence_name(self._name.text())
-        name = self._state.sequence_name.strip() or "Untitled"
-        safe = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in name)[:80]
+        name = self._name_for_json_file(self._name.text())
         path_str, _ = QFileDialog.getSaveFileName(
             self,
             "Save sequence",
-            str(Path.home() / f"{safe}.json"),
+            self._save_dialog_initial_path(name),
             "JSON sequence (*.json);;All files (*.*)",
         )
         if not path_str:
             return
+        resolved = str(Path(path_str).resolve())
         try:
             save_sequence(path_str, name, self._state.document)
-            save_last_sequence_path(str(Path(path_str).resolve()))
+            save_last_sequence_path(resolved)
         except OSError as e:
             QMessageBox.warning(self, "Save failed", str(e))
+            return
+        self._state.set_sequence_name(resolved)
 
     def _on_load(self) -> None:
         path_str, _ = QFileDialog.getOpenFileName(
@@ -197,5 +221,7 @@ class SequenceToolbar(QGroupBox):
             QMessageBox.warning(self, "Load failed", err)
             return
 
-        self._state.set_sequence_name(Path(path_str).name)
+        resolved = str(Path(path_str).resolve())
+        save_last_sequence_path(resolved)
+        self._state.set_sequence_name(resolved)
         self._state.replace_document(document, active_tab=0)

@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabBar, QVBoxLayout, QWid
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
 from sequencer_gui.persistence import load_window_geometry, save_row_labels, save_window_geometry
+from sequencer_gui.ui.artiq_panel import ArtiqPanel
 from sequencer_gui.ui.block_strip import BlockStripWidget
 from sequencer_gui.ui.channel_matrix import ChannelMatrix
 from sequencer_gui.ui.scan_panel import ScanPanel
@@ -32,10 +33,12 @@ class MainWindow(QMainWindow):
         top_row_layout.setContentsMargins(0, 0, 0, 0)
         top_row_layout.setSpacing(10)
         toolbar = SequenceToolbar(state)
-        top_row_layout.addWidget(toolbar, 0, Qt.AlignLeft | Qt.AlignTop)
+        top_row_layout.addWidget(toolbar, 0, Qt.AlignLeft)
+        self._artiq_panel = ArtiqPanel()
+        top_row_layout.addWidget(self._artiq_panel, 0)
         self._scan_panel = ScanPanel(state)
         # Stretch so Scan (and its parameter cards) uses width to the right of Sequence, not a few pixels.
-        top_row_layout.addWidget(self._scan_panel, 1, Qt.AlignTop)
+        top_row_layout.addWidget(self._scan_panel, 1)
         layout.addWidget(top_row, 0)
 
         self._strip = BlockStripWidget(state)
