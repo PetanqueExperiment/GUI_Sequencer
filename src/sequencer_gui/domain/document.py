@@ -300,6 +300,19 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
     )
 
 
+def merged_timeline_col_offset_for_block(doc: SequenceDocument, block_index: int) -> int:
+    """First column index for a block in ``merge_blocks(doc, enabled_only=True)``."""
+    if not (0 <= block_index < len(doc.blocks)):
+        return 0
+    col_off = 0
+    for bi, b in enumerate(doc.blocks):
+        if bi == block_index:
+            return col_off
+        if b.enabled:
+            col_off += b.cols
+    return col_off
+
+
 def merged_enabled_timeline_col_to_block(doc: SequenceDocument, merged_col: int) -> Tuple[int, int] | None:
     """Map a column in ``merge_blocks(doc, enabled_only=True)`` to ``(block_index, col_in_block)``.
 

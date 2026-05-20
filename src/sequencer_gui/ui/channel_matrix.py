@@ -16,7 +16,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from sequencer_gui.app.state import SequenceAppState
+from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
+from sequencer_gui.domain.document import merged_timeline_col_offset_for_block
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.ui.device_row import (
     GRID_H_SPACING_PX,
@@ -393,6 +394,12 @@ class ChannelMatrix(QGroupBox):
         self._sync_scroll_hosts_height()
         self._refresh_horizontal_ranges()
 
+    def _timeline_column_index_offset(self) -> int:
+        tab = self._state.active_tab_index
+        if tab == COMPLETE_TAB_INDEX:
+            return 0
+        return merged_timeline_col_offset_for_block(self._state.document, tab)
+
     def _build_time_steps(self, model: SequenceModel) -> int:
         self._time_steps = QWidget()
         ts_grid = QGridLayout(self._time_steps)
@@ -403,8 +410,9 @@ class ChannelMatrix(QGroupBox):
             ts_grid.setColumnMinimumWidth(col, STEP_COLUMN_WIDTH_PX)
             ts_grid.setColumnStretch(col, 0)
 
+        col_index_offset = self._timeline_column_index_offset()
         for c in range(model.cols):
-            ts_grid.addWidget(_make_timestep_index_label(c), 0, c)
+            ts_grid.addWidget(_make_timestep_index_label(col_index_offset + c), 0, c)
 
             label_ed = QLineEdit(model.col_label(c))
             label_ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
