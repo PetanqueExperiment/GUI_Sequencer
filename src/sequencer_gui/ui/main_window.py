@@ -11,6 +11,7 @@ from sequencer_gui.ui.block_strip import BlockStripWidget
 from sequencer_gui.ui.channel_matrix import ChannelMatrix
 from sequencer_gui.ui.scan_panel import ScanPanel
 from sequencer_gui.ui.sequence_toolbar import SequenceToolbar
+from sequencer_gui.ui.static_parameters_panel import StaticParametersPanel
 
 
 class MainWindow(QMainWindow):
@@ -49,8 +50,15 @@ class MainWindow(QMainWindow):
         self._tab_bar.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self._tab_bar, 0)
 
+        matrix_row = QWidget()
+        matrix_row_layout = QHBoxLayout(matrix_row)
+        matrix_row_layout.setContentsMargins(0, 0, 0, 0)
+        matrix_row_layout.setSpacing(6)
         self._matrix = ChannelMatrix(state)
-        layout.addWidget(self._matrix, 1)
+        matrix_row_layout.addWidget(self._matrix, 1)
+        self._static_panel = StaticParametersPanel(state)
+        matrix_row_layout.addWidget(self._static_panel, 0, Qt.AlignTop)
+        layout.addWidget(matrix_row, 1)
 
         state.document_changed.connect(self._sync_tab_titles)
         state.active_tab_changed.connect(self._sync_tab_selection)

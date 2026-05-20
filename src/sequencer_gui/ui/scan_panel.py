@@ -29,7 +29,9 @@ from sequencer_gui.pycam_experiment import (
     stop_experiment_if_running,
 )
 from sequencer_gui.scan_plan import (
+    anticipated_scan_duration_s,
     build_scan_tags,
+    format_duration_hms,
     is_delay_scan_device,
     resolve_scan_bindings,
 )
@@ -102,6 +104,14 @@ class ScanPanel(QGroupBox):
         self._btn_interrupt.clicked.connect(self._on_interrupt)
         scan_actions.addWidget(self._btn_interrupt)
         controls.addLayout(scan_actions)
+
+        self._duration_label = QLabel()
+        self._duration_label.setToolTip(
+            "Estimated total sequence runtime for all scan points and repetitions "
+            "(enabled blocks only; per-point duration when scanning timestep delays)."
+        )
+        controls.addWidget(self._duration_label)
+
         controls.addStretch(1)
 
         row.addLayout(controls, 0)
@@ -132,8 +142,13 @@ class ScanPanel(QGroupBox):
         state.row_labels_changed.connect(self._rebuild_param_cards)
         state.scan_running_changed.connect(self._apply_scan_running_ui)
         state.scan_running_changed.connect(lambda _running: self._update_label_color())
+        state.document_changed.connect(self._update_anticipated_duration)
+        state.delays_changed.connect(self._update_anticipated_duration)
+        state.scan_parameters_changed.connect(self._update_anticipated_duration)
+        state.scan_repetitions_changed.connect(self._update_anticipated_duration)
         self._rebuild_param_cards()
         self._apply_scan_running_ui(state.scan_running)
+        self._update_anticipated_duration()
 
         self._label_color_poll = QTimer(self)
         self._label_color_poll.timeout.connect(self._update_label_color)
@@ -186,6 +201,19 @@ class ScanPanel(QGroupBox):
             return
         n = int(text)
         self._state.set_scan_repetitions(n)
+
+    def _update_anticipated_duration(self) -> None:
+        seconds = anticipated_scan_duration_s(
+            self._state.document,
+            self._state.scan_parameters,
+            self._state.scan_repetitions,
+        )
+        if seconds is None:
+            self._duration_label.setText("Anticipated duration: —")
+            return
+        self._duration_label.setText(
+            f"Anticipated duration: {format_duration_hms(seconds)}"
+        )
 
     def _apply_scan_running_ui(self, running: bool) -> None:
         self._btn_start_scan.setEnabled(not running)
@@ -347,6 +375,7 @@ class ScanPanel(QGroupBox):
             self._cards_layout.addWidget(self._make_param_card(i, p))
 
         self._cards_host.adjustSize()
+        self._update_anticipated_duration()
         if self._state.scan_parameters:
             card_h = max(
                 self._cards_layout.itemAt(i).widget().sizeHint().height()
@@ -514,6 +543,7 @@ class ScanPanel(QGroupBox):
         values_edit.editingFinished.connect(
             lambda idx=index, e=values_edit: self._state.set_scan_parameter_values_text(idx, e.text())
         )
+        values_edit.editingFinished.connect(lambda: self._update_anticipated_duration())
         outer.addWidget(values_edit)
 
         return frame

@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from itertools import product
 
 from sequencer_gui.app.state import ScanParameter
-from sequencer_gui.domain.document import SequenceDocument, merge_blocks, merged_enabled_timeline_col_to_block
+from sequencer_gui.domain.document import (
+    SequenceDocument,
+    complete_timeline_duration_us,
+    merge_blocks,
+    merged_enabled_timeline_col_to_block,
+)
 from sequencer_gui.software_objects import get_object
 
 # Device field aliases for scanning per-step delay (µs) instead of an analog parameter.
@@ -215,3 +220,70 @@ def build_scan_points(
         ScanPoint(bindings=bindings, values=tuple(combo))
         for combo in product(*axes)
     ]
+
+
+def format_duration_hms(seconds: float) -> str:
+    """Wall-clock style duration for scan planning (e.g. ``2h 15min 30s``)."""
+    if seconds < 0 or seconds != seconds:  # NaN
+        seconds = 0.0
+    total = int(round(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}min")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def document_with_scan_point(document: SequenceDocument, point: ScanPoint) -> SequenceDocument:
+    """Copy of ``document`` with one scan step applied (does not mutate the original)."""
+    doc = document
+    for binding, value in zip(point.bindings, point.values):
+        resolved = merged_enabled_timeline_col_to_block(doc, binding.merged_col)
+        if resolved is None:
+            continue
+        bi, local_col = resolved
+        block = doc.blocks[bi]
+        if binding.is_delay:
+            doc = doc.with_block(bi, block.with_delay_us(local_col, float(value)))
+        else:
+            doc = doc.with_block(
+                bi,
+                block.with_analog(
+                    doc.rows, binding.row, binding.param_id, local_col, float(value)
+                ),
+            )
+    return doc
+
+
+def anticipated_scan_duration_s(
+    document: SequenceDocument,
+    parameters: tuple[ScanParameter, ...],
+    repetitions: int,
+) -> float | None:
+    """
+    Estimated runtime: sum over scan points of (per-shot cycle time × repetitions).
+
+    Returns ``None`` when the scan plan is incomplete or invalid.
+    """
+    reps = max(1, repetitions)
+    try:
+        if parameters:
+            points = build_scan_points(document, parameters)
+        else:
+            points = []
+    except ValueError:
+        return None
+
+    if not parameters:
+        return complete_timeline_duration_us(document) * reps / 1e6
+
+    total_us = 0.0
+    for point in points:
+        doc = document_with_scan_point(document, point)
+        total_us += complete_timeline_duration_us(doc) * reps
+    return total_us / 1e6
