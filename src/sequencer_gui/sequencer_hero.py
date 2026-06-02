@@ -350,6 +350,39 @@ class Sequencer_HERO(LocalHERO):
             block_index, time_slot_index, _DDS_FREQUENCY_PARAM, device_index
         )
 
+    def _static_section(self) -> Dict[str, Any]:
+        doc = self._sequence_snapshot().get("document", {})
+        raw = doc.get("static")
+        return raw if isinstance(raw, dict) else {}
+
+    def get_static_index_by_label(self, label: str) -> "numpy.int32":
+        """Row index in ``document['static']['labels']``, or ``-1`` if absent."""
+        try:
+            labels: list = self._static_section().get("labels", [])
+            return numpy.int32(labels.index(label))
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return numpy.int32(-1)
+
+    def get_static_float(self, param: str, static_index: int = 0) -> float:
+        """
+        Between-shot static value (same for every sequence step), e.g. VOA amplitude in V.
+        Reads ``document['static']['values'][str(index)][param]``; missing keys use ``0.0``.
+        """
+        p = (param or "").strip().lower()
+        if not p:
+            raise ValueError("param must be a non-empty string")
+        try:
+            row = self._static_section()["values"][str(int(static_index))]
+            if isinstance(row, dict) and p in row:
+                return float(row[p])
+        except (KeyError, TypeError, ValueError):
+            pass
+        return 0.0
+
+    def get_static_float_by_label(self, param: str, static_label: str) -> float:
+        """Like :meth:`get_static_float` but selects the static row by label."""
+        return self.get_static_float(param, int(self.get_static_index_by_label(static_label)))
+
     def set_run_sequence(self, on: bool) -> None:
         """Set from the GUI only; independent of the JSON snapshot."""
         object.__setattr__(self, "_run_sequence", bool(on))

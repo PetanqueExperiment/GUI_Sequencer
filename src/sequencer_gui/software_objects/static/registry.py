@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sequencer_gui.software_objects.protocol import SoftwareObject
+from sequencer_gui.software_objects.static.voa import VOA_ID, VoaObject
 from sequencer_gui.software_objects.types import AnalogParameterSpec
 
 _OBJECTS: dict[str, SoftwareObject] = {}
@@ -39,11 +40,11 @@ def get_object(object_id: str) -> SoftwareObject:
     return _UnknownObject(id=object_id, display_name=object_id)
 
 
-CATALOG_ORDER: tuple[str, ...] = ()
+CATALOG_ORDER: tuple[str, ...] = (VOA_ID,)
 
 
 def _build_registry() -> None:
-    pass
+    register(VoaObject())
 
 
 _build_registry()

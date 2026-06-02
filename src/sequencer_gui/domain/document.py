@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, NamedTuple, Tuple
 
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
 from sequencer_gui.domain.model import SequenceModel
-from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
+from sequencer_gui.domain.static_defaults import (
+    DEFAULT_STATIC_ROWS,
+    default_static_analog,
+    default_static_labels,
+    default_static_software,
+)
+from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object, get_static_object
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,10 @@ class SequenceDocument:
     row_labels: Tuple[str, ...]
     row_software: Tuple[str, ...]
     blocks: Tuple[SequenceBlock, ...]
+    static_rows: int = DEFAULT_STATIC_ROWS
+    static_labels: Tuple[str, ...] = ()
+    static_software: Tuple[str, ...] = ()
+    static_analog: Dict[Tuple[int, str], float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.rows < 1:
@@ -119,30 +129,90 @@ class SequenceDocument:
                 for i in range(self.rows)
             )
             object.__setattr__(self, "row_software", rs)
+        if self.static_rows < 0:
+            raise ValueError("static_rows must be non-negative")
+        if not self.static_labels:
+            object.__setattr__(self, "static_labels", default_static_labels(self.static_rows))
+        elif len(self.static_labels) != self.static_rows:
+            labels = tuple(
+                self.static_labels[i] if i < len(self.static_labels) else f"VOA {i + 1}"
+                for i in range(self.static_rows)
+            )
+            object.__setattr__(self, "static_labels", labels)
+        if not self.static_software:
+            object.__setattr__(self, "static_software", default_static_software(self.static_rows))
+        elif len(self.static_software) != self.static_rows:
+            rs = tuple(
+                self.static_software[i] if i < len(self.static_software) else default_static_software(1)[0]
+                for i in range(self.static_rows)
+            )
+            object.__setattr__(self, "static_software", rs)
+        if self.static_rows > 0 and not self.static_analog:
+            object.__setattr__(
+                self, "static_analog", default_static_analog(self.static_rows)
+            )
         if len(self.blocks) < 1:
             raise ValueError("at least one block is required")
+
+    def static_label(self, row: int) -> str:
+        return self.static_labels[row]
+
+    def static_software_name(self, row: int) -> str:
+        return self.static_software[row]
+
+    def static_value(self, row: int, param_id: str) -> float:
+        """Resolved static value (one number for the whole sequence)."""
+        key = (row, param_id)
+        if key in self.static_analog:
+            return float(self.static_analog[key])
+        obj = get_static_object(self.static_software_name(row))
+        for p in obj.analog_parameters:
+            if p.param_id == param_id:
+                return float(p.default)
+        return 0.0
+
+    def static_display_text(self, row: int, param_id: str, *, decimals: int) -> str:
+        return format(self.static_value(row, param_id), f".{decimals}f")
+
+    def with_static_value(self, row: int, param_id: str, value: float) -> SequenceDocument:
+        if not (0 <= row < self.static_rows):
+            raise IndexError("static row index out of range")
+        a = dict(self.static_analog)
+        a[(row, param_id)] = float(value)
+        return replace(self, static_analog=a)
+
+    def with_static_label(self, row: int, text: str) -> SequenceDocument:
+        if not (0 <= row < self.static_rows):
+            raise IndexError("static row index out of range")
+        lst = list(self.static_labels)
+        lst[row] = text
+        return replace(self, static_labels=tuple(lst))
+
+    def with_static_software(self, row: int, object_name: str) -> SequenceDocument:
+        if not (0 <= row < self.static_rows):
+            raise IndexError("static row index out of range")
+        lst = list(self.static_software)
+        lst[row] = object_name
+        obj = get_static_object(object_name)
+        valid_ids = {p.param_id for p in obj.analog_parameters}
+        a = dict(self.static_analog)
+        for key in list(a.keys()):
+            r, pid = key
+            if r == row and pid not in valid_ids:
+                del a[key]
+        return replace(self, static_software=tuple(lst), static_analog=a)
 
     def with_block(self, index: int, block: SequenceBlock) -> SequenceDocument:
         if not (0 <= index < len(self.blocks)):
             raise IndexError("block index out of range")
         lst = list(self.blocks)
         lst[index] = block
-        return SequenceDocument(
-            rows=self.rows,
-            row_labels=self.row_labels,
-            row_software=self.row_software,
-            blocks=tuple(lst),
-        )
+        return replace(self, blocks=tuple(lst))
 
     def with_blocks(self, blocks: Tuple[SequenceBlock, ...]) -> SequenceDocument:
         if len(blocks) < 1:
             raise ValueError("at least one block is required")
-        return SequenceDocument(
-            rows=self.rows,
-            row_labels=self.row_labels,
-            row_software=self.row_software,
-            blocks=blocks,
-        )
+        return replace(self, blocks=blocks)
 
     def with_move_block(self, from_index: int, to_index: int) -> SequenceDocument:
         """Move one block to a new index in the ordered list (0..len-1)."""
@@ -161,12 +231,7 @@ class SequenceDocument:
             raise IndexError("row index out of range")
         lst = list(self.row_labels)
         lst[row] = text
-        return SequenceDocument(
-            rows=self.rows,
-            row_labels=tuple(lst),
-            row_software=self.row_software,
-            blocks=self.blocks,
-        )
+        return replace(self, row_labels=tuple(lst))
 
     def with_row_software(self, row: int, object_name: str) -> SequenceDocument:
         if not (0 <= row < self.rows):
@@ -189,12 +254,7 @@ class SequenceDocument:
             new_blocks.append(
                 b._copy(channels=ch, analog=a)
             )
-        return SequenceDocument(
-            rows=self.rows,
-            row_labels=self.row_labels,
-            row_software=tuple(lst),
-            blocks=tuple(new_blocks),
-        )
+        return replace(self, row_software=tuple(lst), blocks=tuple(new_blocks))
 
 
 def block_to_sequence_model(doc: SequenceDocument, block_index: int) -> SequenceModel:

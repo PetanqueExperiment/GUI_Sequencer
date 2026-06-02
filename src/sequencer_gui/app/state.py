@@ -57,6 +57,8 @@ class SequenceAppState(QObject):
     delays_changed = pyqtSignal()
     analog_changed = pyqtSignal()
     row_labels_changed = pyqtSignal()
+    static_labels_changed = pyqtSignal()
+    static_changed = pyqtSignal()
     sequence_name_changed = pyqtSignal(str)
     run_sequence_changed = pyqtSignal(bool)
     scan_running_changed = pyqtSignal(bool)
@@ -438,6 +440,22 @@ class SequenceAppState(QObject):
     def set_row_label(self, row: int, text: str) -> None:
         self._commit_document(self._document.with_row_label(row, text))
         self.row_labels_changed.emit()
+
+    def set_static_label(self, row: int, text: str) -> None:
+        if self._document.static_label(row) == text:
+            return
+        self._commit_document(self._document.with_static_label(row, text))
+        self.static_labels_changed.emit()
+
+    def set_static_software(self, row: int, object_name: str) -> None:
+        if self._document.static_software_name(row) == object_name:
+            return
+        self._commit_document(self._document.with_static_software(row, object_name))
+        self.static_changed.emit()
+
+    def set_static_value(self, row: int, param_id: str, value: float) -> None:
+        self._commit_document(self._document.with_static_value(row, param_id, value))
+        self.static_changed.emit()
 
     def set_block_name(self, block_index: int, name: str) -> None:
         b = self._document.blocks[block_index]

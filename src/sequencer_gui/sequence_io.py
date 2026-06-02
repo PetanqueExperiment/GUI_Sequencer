@@ -21,7 +21,13 @@ from typing import Any
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
 from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, SequenceModel
-from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
+from sequencer_gui.domain.static_defaults import (
+    DEFAULT_STATIC_ROWS,
+    default_static_analog,
+    default_static_labels,
+    default_static_software,
+)
+from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object, get_static_object
 
 FORMAT_ID = "sequencer_gui_sequence"
 FORMAT_VERSION = 8
@@ -145,13 +151,84 @@ def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str
     return payload
 
 
-def document_to_payload(document: SequenceDocument) -> dict[str, Any]:
+def _static_payload(document: SequenceDocument) -> dict[str, Any]:
+    values: dict[str, dict[str, float]] = {}
+    for (r, param_id), val in document.static_analog.items():
+        skey = str(int(r))
+        values.setdefault(skey, {})[param_id] = float(val)
     return {
+        "rows": document.static_rows,
+        "labels": list(document.static_labels),
+        "software": [document.static_software[r] for r in range(document.static_rows)],
+        "values": values,
+    }
+
+
+def _parse_static_payload(data: Any) -> tuple[int, tuple[str, ...], tuple[str, ...], dict[tuple[int, str], float]]:
+    if not isinstance(data, dict):
+        rows = DEFAULT_STATIC_ROWS
+        return (
+            rows,
+            default_static_labels(rows),
+            default_static_software(rows),
+            default_static_analog(rows),
+        )
+    try:
+        rows = int(data.get("rows", DEFAULT_STATIC_ROWS))
+    except (TypeError, ValueError) as e:
+        raise SequenceFileError("Invalid static.rows") from e
+    if rows < 0:
+        raise SequenceFileError("static.rows must be non-negative")
+    if rows == 0:
+        return 0, (), (), {}
+
+    raw_labels = data.get("labels")
+    if isinstance(raw_labels, list) and raw_labels:
+        labels = tuple(str(x) for x in raw_labels[:rows])
+        if len(labels) < rows:
+            labels = labels + default_static_labels(rows)[len(labels) :]
+    else:
+        labels = default_static_labels(rows)
+
+    raw_sw = data.get("software")
+    if isinstance(raw_sw, list) and raw_sw:
+        software = tuple(
+            str(raw_sw[i]) if i < len(raw_sw) else default_static_software(1)[0] for i in range(rows)
+        )
+    else:
+        software = default_static_software(rows)
+
+    analog: dict[tuple[int, str], float] = {}
+    raw_values = data.get("values")
+    if isinstance(raw_values, dict):
+        for skey, row in raw_values.items():
+            try:
+                r = int(skey)
+            except (TypeError, ValueError):
+                continue
+            if not (0 <= r < rows) or not isinstance(row, dict):
+                continue
+            valid_param = {p.param_id for p in get_static_object(software[r]).analog_parameters}
+            for param_id, cell in row.items():
+                if param_id not in valid_param:
+                    continue
+                try:
+                    analog[(r, str(param_id))] = float(cell)
+                except (TypeError, ValueError):
+                    continue
+    return rows, labels, software, analog
+
+
+def document_to_payload(document: SequenceDocument) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "rows": document.rows,
         "row_labels": list(document.row_labels),
         "row_software": [document.row_software[r] for r in range(document.rows)],
         "blocks": [_block_payload(b, document) for b in document.blocks],
     }
+    if document.static_rows > 0:
+        payload["static"] = _static_payload(document)
+    return payload
 
 
 def _block_from_payload(
@@ -262,7 +339,17 @@ def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
     )
 
     blocks = tuple(_block_from_payload(b, rows, row_software) for b in raw_blocks)
-    return SequenceDocument(rows=rows, row_labels=labels, row_software=row_software, blocks=blocks)
+    static_rows, static_labels, static_software, static_analog = _parse_static_payload(data.get("static"))
+    return SequenceDocument(
+        rows=rows,
+        row_labels=labels,
+        row_software=row_software,
+        blocks=blocks,
+        static_rows=static_rows,
+        static_labels=static_labels,
+        static_software=static_software,
+        static_analog=static_analog,
+    )
 
 
 def live_sequence_file_dict(name: str, document: SequenceDocument) -> dict[str, Any]:
