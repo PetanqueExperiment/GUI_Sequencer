@@ -65,6 +65,14 @@ class Sequencer_HERO(LocalHERO):
                 # Best-effort: the GUI will immediately push the authoritative document.
                 pass
 
+    def get_full_sequence(self, MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES):
+        total_steps = self.get_total_nb_steps()
+        sequence_data_delay = self.get_seq_delay_list(MAX_TOTAL_SEQUENCER_STEPS)
+        sequence_data_bool = self.get_seq_bool_array(MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES)
+        sequence_data_float = self.get_seq_float_array(MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES)
+
+        return total_steps, sequence_data_delay, sequence_data_bool, sequence_data_float
+
     def _sequence_snapshot(self) -> Dict[str, Any]:
         """Live JSON-shaped mapping; use this from all heros-exposed methods."""
         try:
@@ -243,6 +251,12 @@ class Sequencer_HERO(LocalHERO):
             out.append(HOLD_SIGNAL)
         return out
 
+    def get_seq_float_array(self, length: int, nb_devices: int) -> List[float]:
+        out = [[HOLD_SIGNAL] * length for _ in range(nb_devices)]
+        for i in range(nb_devices):
+            out[i] = self.get_seq_float_list(length, i)
+        return out
+
     def get_seq_float_list_by_label(
         self,
         param: str,
@@ -327,6 +341,12 @@ class Sequencer_HERO(LocalHERO):
                     out.append(False)
         while len(out) < length:
             out.append(False)
+        return out
+
+    def get_seq_bool_array(self, length: int, nb_devices: int) -> List[bool]:
+        out = [[False] * length for _ in range(nb_devices)]
+        for i in range(nb_devices):
+            out[i] = self.get_seq_bool_list(length, i)
         return out
 
     def get_seq_bool_list_by_label(
