@@ -9,6 +9,7 @@ from sequencer_gui.software_objects.dynamical.current_source import (
     CurrentSourceObject,
 )
 from sequencer_gui.software_objects.dynamical.dds import DDS_ID, DdsObject
+from sequencer_gui.software_objects.dynamical.voa import VOA_ID, VoaObject
 from sequencer_gui.software_objects.protocol import SoftwareObject
 from sequencer_gui.software_objects.dynamical.shutter import SHUTTER_ID, ShutterObject
 from sequencer_gui.software_objects.dynamical.ttl import TTL_ID, TtlObject
@@ -55,6 +56,7 @@ CATALOG_ORDER: tuple[str, ...] = (
     TTL_ID,
     DDS_ID,
     CURRENT_SOURCE_ID,
+    VOA_ID,
 )
 
 
@@ -65,6 +67,7 @@ def _build_registry() -> None:
     register(TtlObject())
     register(DdsObject())
     register(CurrentSourceObject())
+    register(VoaObject())
 
 
 _build_registry()
