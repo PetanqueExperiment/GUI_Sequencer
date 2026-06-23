@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QCursor
+from PyQt5.QtGui import QColor, QCursor, QIntValidator
 from PyQt5.QtWidgets import (
     QApplication,
     QColorDialog,
@@ -273,6 +273,25 @@ class BlockStripWidget(QGroupBox):
             on_btn.blockSignals(False)
             on_btn.setText("On" if b.enabled else "Off")
             row_actions.addWidget(on_btn)
+
+            row_actions.addWidget(QLabel("Steps:"))
+            steps_edit = QLineEdit(str(b.cols))
+            steps_edit.setValidator(QIntValidator(1, 9999, frame))
+            steps_edit.setFixedWidth(48)
+            steps_edit.setToolTip("Number of time steps in this block")
+
+            def make_steps_finished(ii: int, e: QLineEdit):
+                def on_finished() -> None:
+                    text = e.text().strip()
+                    if not text:
+                        e.setText(str(self._state.document.blocks[ii].cols))
+                        return
+                    self._state.set_block_cols(ii, int(text))
+
+                return on_finished
+
+            steps_edit.editingFinished.connect(make_steps_finished(idx, steps_edit))
+            row_actions.addWidget(steps_edit)
 
             row_actions.addStretch(1)
 

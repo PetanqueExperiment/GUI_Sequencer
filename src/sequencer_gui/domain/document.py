@@ -60,6 +60,23 @@ class SequenceBlock:
     def with_accent_color(self, accent_color: str | None) -> SequenceBlock:
         return self._copy(accent_color=accent_color)
 
+    def with_cols(self, cols: int) -> SequenceBlock:
+        if cols < 1:
+            raise ValueError("block cols must be positive")
+        if cols == self.cols:
+            return self
+        channels = {(r, c): v for (r, c), v in self.channels.items() if c < cols}
+        delays_us = {c: v for c, v in self.delays_us.items() if c < cols}
+        analog = {(r, pid, c): v for (r, pid, c), v in self.analog.items() if c < cols}
+        col_labels = self.col_labels[:cols] if len(self.col_labels) >= cols else self.col_labels
+        return self._copy(
+            cols=cols,
+            channels=channels,
+            delays_us=delays_us,
+            analog=analog,
+            col_labels=col_labels,
+        )
+
     def with_channel(self, rows: int, row: int, col: int, on: bool) -> SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
             raise IndexError("channel index out of range")

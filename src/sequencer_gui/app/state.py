@@ -475,6 +475,19 @@ class SequenceAppState(QObject):
             return
         self._commit_document(self._document.with_block(block_index, b.with_accent_color(accent_color)))
 
+    def set_block_cols(self, block_index: int, cols: int) -> None:
+        if cols < 1:
+            cols = 1
+        if not (0 <= block_index < len(self._document.blocks)):
+            raise IndexError("block index out of range")
+        b = self._document.blocks[block_index]
+        if b.cols == cols:
+            return
+        self._commit_document(self._document.with_block(block_index, b.with_cols(cols)))
+        self.channels_changed.emit()
+        self.delays_changed.emit()
+        self.analog_changed.emit()
+
     def move_block(self, from_index: int, to_index: int) -> None:
         if from_index == to_index:
             return
