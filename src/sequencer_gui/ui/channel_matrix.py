@@ -52,10 +52,105 @@ _TIME_ROW_MIN_HEIGHT_PX = 28
 _DELAY_MIN_US = 0.0
 _DELAY_MAX_US = 1e9
 _DELAY_DECIMALS = 3
+_US_PER_MS = 1000.0
+_US_PER_10MS = 10_000.0  # 10 ms
+
+# Light backgrounds hinting at delay order of magnitude (values stored in µs).
+_DELAY_MAGNITUDE_BG = {
+    "10ms": "#ffe6e8",   # >= 10 ms
+    "ms": "#f2fff3",  # >= 1 ms and < 10 ms
+    "us": "#ebf6ff",  # >= 1 µs and < 1 ms
+    "ns": "#fcebff",  # < 1 µs
+}
 
 
 def _format_delay_us(v: float) -> str:
     return format(v, f".{_DELAY_DECIMALS}f")
+
+
+def _delay_magnitude_background_us(value_us: float) -> str:
+    if value_us >= _US_PER_10MS:
+        return _DELAY_MAGNITUDE_BG["10ms"]
+    if value_us >= _US_PER_MS:
+        return _DELAY_MAGNITUDE_BG["ms"]
+    if value_us >= 1.0:
+        return _DELAY_MAGNITUDE_BG["us"]
+    return _DELAY_MAGNITUDE_BG["ns"]
+
+
+class _DelayUsLineEdit(CommitFloatLineEdit):
+    """Delay field with magnitude background tint; preserves tint while editing."""
+
+    def __init__(
+        self,
+        minimum: float,
+        maximum: float,
+        decimals: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(minimum, maximum, decimals, parent)
+        self._delay_us = 0.0
+        self._block_accent: str | None = None
+        self._block_separator = False
+
+    def set_block_column_context(self, accent: str | None, *, block_separator: bool) -> None:
+        self._block_accent = accent
+        self._block_separator = block_separator
+        self._refresh_style(editing=self.text() != self._committed_text)
+
+    def set_delay_us_value(self, value_us: float) -> None:
+        self._delay_us = value_us
+        self._refresh_style(editing=self.text() != self._committed_text)
+
+    def _effective_delay_us_for_style(self) -> float:
+        if self.text() != self._committed_text:
+            parsed = parse_float_field(self.text())
+            if parsed is not None:
+                return max(self.minimum(), min(self.maximum(), parsed))
+        return self._delay_us
+
+    def minimum(self) -> float:
+        return self._minimum
+
+    def maximum(self) -> float:
+        return self._maximum
+
+    def _refresh_style(self, *, editing: bool) -> None:
+        bg = _delay_magnitude_background_us(self._effective_delay_us_for_style())
+        parts = [f"background-color: {bg};"]
+        parts.append("color: #9e9e9e;" if editing else "color: #212121;")
+        if self._block_accent is not None and self._block_separator:
+            parts.append(f"border-left: 2px solid {self._block_accent};")
+        self.setStyleSheet(" ".join(parts))
+
+    def set_committed_display(self, text: str) -> None:
+        pos_before = self.cursorPosition()
+        self._style_guard = True
+        self._committed_text = text
+        self.blockSignals(True)
+        self.setText(text)
+        self.blockSignals(False)
+        self._style_guard = False
+        self.setCursorPosition(min(pos_before, len(text)))
+        self._refresh_style(editing=False)
+
+    def _on_text_changed(self, _text: str) -> None:
+        if self._style_guard:
+            return
+        self._refresh_style(editing=True)
+
+    def focusOutEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if self.text() != self._committed_text:
+            self.set_committed_display(self._committed_text)
+        else:
+            self._refresh_style(editing=False)
+        QLineEdit.focusOutEvent(self, event)
+
+    def _try_arrow_step(self, direction: int) -> bool:
+        result = super()._try_arrow_step(direction)
+        if result:
+            self._refresh_style(editing=True)
+        return result
 
 
 def _make_timestep_index_label(
@@ -215,7 +310,7 @@ class ChannelMatrix(QGroupBox):
         self._state = state
         self._device_rows: list[DeviceRowWidget] = []
         self._col_label_edits: list[QLineEdit] = []
-        self._delay_edits: list[CommitFloatLineEdit] = []
+        self._delay_edits: list[_DelayUsLineEdit] = []
         self._built_rows = -1
         self._built_cols = -1
         self._built_tab = -2
@@ -270,7 +365,9 @@ class ChannelMatrix(QGroupBox):
             return
         x = max(_DELAY_MIN_US, min(_DELAY_MAX_US, parsed))
         self._state.set_delay_us(col, x)
-        line.set_committed_display(_format_delay_us(self._state.model.delay_us(col, 0.0)))
+        committed = self._state.model.delay_us(col, 0.0)
+        line.set_delay_us_value(committed)
+        line.set_committed_display(_format_delay_us(committed))
 
     def _clear_content(self) -> None:
         self._device_rows.clear()
@@ -531,9 +628,12 @@ class ChannelMatrix(QGroupBox):
                 _apply_block_column_hint(label_ed, accent, block_separator=block_separator)
             ts_grid.addWidget(label_ed, label_row, c)
 
-            ed = CommitFloatLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
+            delay_us = model.delay_us(c, 0.0)
+            ed = _DelayUsLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
             ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-            ed.set_committed_display(_format_delay_us(model.delay_us(c, 0.0)))
+            ed.set_block_column_context(accent, block_separator=block_separator)
+            ed.set_delay_us_value(delay_us)
+            ed.set_committed_display(_format_delay_us(delay_us))
 
             def make_return(cc: int):
                 def on_return() -> None:
@@ -544,8 +644,6 @@ class ChannelMatrix(QGroupBox):
             ed.set_on_return(make_return(c))
             self._delay_edits.append(ed)
             ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            if accent is not None:
-                _apply_block_column_hint(ed, accent, block_separator=block_separator)
             ts_grid.addWidget(ed, delay_row, c)
 
         steps_time_gap = QWidget()
@@ -744,6 +842,7 @@ class ChannelMatrix(QGroupBox):
             if c >= model.cols:
                 break
             v = model.delay_us(c, 0.0)
+            ed.set_delay_us_value(v)
             ed.set_committed_display(_format_delay_us(v))
         for dr in self._device_rows:
             dr.sync_from_model(model)
