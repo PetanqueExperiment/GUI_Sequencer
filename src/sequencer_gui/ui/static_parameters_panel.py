@@ -37,7 +37,7 @@ class StaticParametersPanel(QWidget):
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state = state
-        self._expanded = True
+        self._expanded = False
         self._structure_sig: tuple[int, tuple[str, ...]] | None = None
         self._row_widgets: list[_StaticRowWidgets] = []
 
