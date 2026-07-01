@@ -9,6 +9,7 @@ from sequencer_gui.software_objects.dynamical.current_source import (
     CurrentSourceObject,
 )
 from sequencer_gui.software_objects.dynamical.dds import DDS_ID, DdsObject
+from sequencer_gui.software_objects.dynamical.piezo import PIEZO_ID, PiezoObject
 from sequencer_gui.software_objects.dynamical.voa import VOA_ID, VoaObject
 from sequencer_gui.software_objects.protocol import SoftwareObject
 from sequencer_gui.software_objects.dynamical.shutter import SHUTTER_ID, ShutterObject
@@ -57,6 +58,7 @@ CATALOG_ORDER: tuple[str, ...] = (
     DDS_ID,
     CURRENT_SOURCE_ID,
     VOA_ID,
+    PIEZO_ID,
 )
 
 
@@ -68,6 +70,7 @@ def _build_registry() -> None:
     register(DdsObject())
     register(CurrentSourceObject())
     register(VoaObject())
+    register(PiezoObject())
 
 
 _build_registry()
