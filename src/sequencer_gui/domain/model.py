@@ -15,6 +15,24 @@ from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 DEFAULT_DEVICE_ROWS: int = 32
 
 
+def matrix_param_bindings(row_software: Tuple[str, ...]) -> Tuple[Tuple[int, str], ...]:
+    """Flattened sequence-matrix analog rows: each device row's params in GUI order."""
+    out: list[tuple[int, str]] = []
+    for r, sw in enumerate(row_software):
+        for p in get_object(sw).analog_parameters:
+            out.append((r, p.param_id))
+    return tuple(out)
+
+
+def matrix_param_base_index(device_row: int, row_software: Tuple[str, ...]) -> int:
+    """Matrix parameter index of the first analog row on ``device_row``."""
+    n = 0
+    for r in range(device_row):
+        if r < len(row_software):
+            n += len(get_object(row_software[r]).analog_parameters)
+    return n
+
+
 @dataclass(frozen=True)
 class SequenceModel:
     """Pure data for channel grid, per-column delays, analog values, row labels, and per-row software."""

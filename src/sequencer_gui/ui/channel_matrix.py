@@ -846,6 +846,8 @@ class ChannelMatrix(QGroupBox):
             ed.set_committed_display(_format_delay_us(v))
         for dr in self._device_rows:
             dr.sync_from_model(model)
+        for dr in self._device_rows:
+            dr.update_matrix_param_indices(model)
         self._apply_steps_width(model)
         self._apply_timeline_read_only()
         self._after_layout()

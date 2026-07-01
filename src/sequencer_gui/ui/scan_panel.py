@@ -35,6 +35,7 @@ from sequencer_gui.scan_plan import (
     is_delay_scan_device,
     resolve_scan_bindings,
 )
+from sequencer_gui.domain.model import matrix_param_bindings
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
@@ -140,6 +141,7 @@ class ScanPanel(QGroupBox):
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
         state.row_labels_changed.connect(self._rebuild_param_cards)
+        state.document_changed.connect(lambda _doc: self._rebuild_param_cards())
         state.scan_running_changed.connect(self._apply_scan_running_ui)
         state.scan_running_changed.connect(lambda _running: self._update_label_color())
         state.document_changed.connect(self._update_anticipated_duration)
@@ -395,6 +397,23 @@ class ScanPanel(QGroupBox):
         except ValueError:
             return None
 
+    def _matrix_param_from_index_text(self, raw: str) -> tuple[str, str] | None:
+        """0-based matrix parameter index -> (device label, param_id)."""
+        text = raw.strip()
+        if not text.isdigit():
+            return None
+        idx = int(text)
+        bindings = matrix_param_bindings(self._state.document.row_software)
+        if not (0 <= idx < len(bindings)):
+            return None
+        row, param_id = bindings[idx]
+        if not (0 <= row < len(self._state.document.row_labels)):
+            return None
+        label = self._state.document.row_labels[row].strip()
+        if not label:
+            return None
+        return label, param_id
+
     def _label_from_index_field_text(self, raw: str, labels: tuple[str, ...]) -> str:
         """0-based index (as in the channel matrix header) -> label; otherwise unchanged."""
         text = raw.strip()
@@ -406,9 +425,6 @@ class ScanPanel(QGroupBox):
             if label:
                 return label
         return text
-
-    def _device_label_from_field_text(self, raw: str) -> str:
-        return self._label_from_index_field_text(raw, self._state.document.row_labels)
 
     def _timestep_label_from_field_text(self, raw: str) -> str:
         return self._label_from_index_field_text(raw, self._state.model.col_labels)
@@ -427,10 +443,16 @@ class ScanPanel(QGroupBox):
         combo.setEnabled(True)
         row = self._row_index_for_device_label(device_label)
         param_id = selected_param_id
+        bindings = matrix_param_bindings(self._state.document.row_software)
         if row is not None:
             obj = get_object(self._state.document.row_software[row])
             for spec in obj.analog_parameters:
-                combo.addItem(spec.label, spec.param_id)
+                label = spec.label
+                for pi, (br, pid) in enumerate(bindings):
+                    if br == row and pid == spec.param_id:
+                        label = f"{spec.label}"
+                        break
+                combo.addItem(label, spec.param_id)
         if combo.count() > 0:
             idx = combo.findData(param_id) if param_id else -1
             if idx < 0:
@@ -472,13 +494,15 @@ class ScanPanel(QGroupBox):
         device_edit.setToolTip(
             "Row label of the device in the sequence, or time / t to scan the "
             "selected timestep duration (µs). "
-            "Enter a 0-based row index and press Enter to fill the label."
+            "Enter a 0-based matrix parameter index (# column on analog rows) "
+            "and press Enter to fill device and parameter."
         )
         device_edit.setCompleter(QCompleter(QStringListModel(device_labels), device_edit))
         param_combo = _NoWheelComboBox()
         param_combo.setMinimumWidth(110)
         param_combo.setToolTip(
-            "Analog parameter of the selected device (fixed to duration when device is time / t)"
+            "Analog parameter of the selected device (matrix # prefix matches the "
+            "sequence matrix). Fixed to duration when device is time / t."
         )
         current_param_id = self._populate_param_combo(param_combo, p.device_label, p.param_id)
         if current_param_id != p.param_id:
@@ -492,14 +516,20 @@ class ScanPanel(QGroupBox):
             raw = dev.text().strip()
             if is_delay_scan_device(raw):
                 label = raw.lower()
+                param_id = "time"
             else:
-                label = self._device_label_from_field_text(dev.text())
+                matrix_hit = self._matrix_param_from_index_text(raw)
+                if matrix_hit is not None:
+                    label, param_id = matrix_hit
+                else:
+                    label = raw
+                    param_id = self._state.scan_parameters[idx].param_id
             if label != dev.text().strip():
                 dev.blockSignals(True)
                 dev.setText(label)
                 dev.blockSignals(False)
             self._state.set_scan_parameter_device_label(idx, label)
-            new_param_id = self._populate_param_combo(combo, label, self._state.scan_parameters[idx].param_id)
+            new_param_id = self._populate_param_combo(combo, label, param_id)
             if new_param_id != self._state.scan_parameters[idx].param_id:
                 self._state.set_scan_parameter_param_id(idx, new_param_id)
 

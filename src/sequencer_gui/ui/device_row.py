@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD
 from sequencer_gui.domain.document import MergedBlockSpan
-from sequencer_gui.domain.model import SequenceModel
+from sequencer_gui.domain.model import SequenceModel, matrix_param_base_index
 from sequencer_gui.software_objects import get_object
 from sequencer_gui.software_objects.types import AnalogParameterSpec
 from sequencer_gui.ui.row_software_selector import LABEL_COL_MIN_WIDTH_PX, RowSoftwareSelector
@@ -274,6 +274,8 @@ class DeviceRowWidget:
         self._analog_edits: list[list[AnalogValueLineEdit]] = []
         self._param_sig: tuple[str, ...] = ()
         self._analog_row_widgets: list[QWidget] = []
+        self._analog_index_labels: list[QLabel] = []
+        self._matrix_param_base = matrix_param_base_index(row, model.row_software)
 
         self._label_panel = QWidget(parent)
         self._steps_panel = QWidget(parent)
@@ -301,12 +303,10 @@ class DeviceRowWidget:
         hlay.setContentsMargins(0, 0, 0, 0)
         hlay.setSpacing(_HEADER_COL_SPACING_PX)
 
-        index_lab = QLabel(str(row))
-        index_lab.setAlignment(Qt.AlignCenter)
-        index_lab.setFixedWidth(_DEVICE_INDEX_WIDTH_PX)
-        index_lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        index_lab.setStyleSheet("color: #78909c; font-size: 11px;")
-        hlay.addWidget(index_lab)
+        index_spacer = QWidget()
+        index_spacer.setFixedWidth(_DEVICE_INDEX_WIDTH_PX)
+        index_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        hlay.addWidget(index_spacer)
 
         self._edit = QLineEdit(m.row_label(row))
         self._edit.setMinimumWidth(36)
@@ -454,13 +454,20 @@ class DeviceRowWidget:
 
     def _clear_analog_section(self) -> None:
         for w in self._analog_row_widgets:
-            if isinstance(w, QLabel):
-                self._label_grid.removeWidget(w)
-            else:
+            if isinstance(w, AnalogValueLineEdit):
                 self._steps_grid.removeWidget(w)
+            else:
+                self._label_grid.removeWidget(w)
             w.deleteLater()
         self._analog_row_widgets.clear()
+        self._analog_index_labels.clear()
         self._analog_edits = []
+
+    def update_matrix_param_indices(self, model: SequenceModel) -> None:
+        """Refresh analog-row # labels after row software above changes."""
+        self._matrix_param_base = matrix_param_base_index(self._row, model.row_software)
+        for pi, lab in enumerate(self._analog_index_labels):
+            lab.setText(str(self._matrix_param_base + pi))
 
     def _on_analog_return_pressed(self, line: AnalogValueLineEdit, spec: AnalogParameterSpec, col: int) -> None:
         model = self._state.model
@@ -498,13 +505,30 @@ class DeviceRowWidget:
         base_row = 1
         for pi, spec in enumerate(obj.analog_parameters):
             g_row = base_row + pi
+            row_w = QWidget()
+            row_w.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+            row_w.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            row_lay = QHBoxLayout(row_w)
+            row_lay.setContentsMargins(0, 0, 0, 0)
+            row_lay.setSpacing(_HEADER_COL_SPACING_PX)
+
+            index_lab = QLabel(str(self._matrix_param_base + pi))
+            index_lab.setAlignment(Qt.AlignCenter)
+            index_lab.setFixedWidth(_DEVICE_INDEX_WIDTH_PX)
+            index_lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            index_lab.setStyleSheet("color: #78909c; font-size: 11px;")
+            index_lab.setToolTip("Matrix parameter index (analog timeline)")
+            row_lay.addWidget(index_lab)
+            self._analog_index_labels.append(index_lab)
+
             lab = QLabel(spec.label)
             lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             lab.setWordWrap(False)
-            lab.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
-            lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self._label_grid.addWidget(lab, g_row, 0)
-            self._analog_row_widgets.append(lab)
+            lab.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            row_lay.addWidget(lab, 1)
+
+            self._label_grid.addWidget(row_w, g_row, 0)
+            self._analog_row_widgets.append(row_w)
 
             edits_row: list[AnalogValueLineEdit] = []
             for c in range(cols):
@@ -540,8 +564,10 @@ class DeviceRowWidget:
         self._sync_channel_strip(model)
         sig = self._param_signature(model)
         if sig != self._param_sig:
+            self._matrix_param_base = matrix_param_base_index(self._row, model.row_software)
             self._rebuild_analog_section()
         else:
+            self.update_matrix_param_indices(model)
             obj = get_object(model.row_software_name(self._row))
             for pi, spec in enumerate(obj.analog_parameters):
                 if pi >= len(self._analog_edits):

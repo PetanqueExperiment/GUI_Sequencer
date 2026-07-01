@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import numpy
 
@@ -11,7 +11,9 @@ from heros import LocalHERO
 
 from sequencer_gui.process_identity import HERO_INSTANCE_NAME, PROCESS_DISPLAY_NAME, SOFTWARE_PID
 from sequencer_gui.domain.analog_stored import HOLD_SIGNAL
+from sequencer_gui.domain.model import matrix_param_bindings
 from sequencer_gui.sequence_io import sequence_model_from_hero_block
+from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 # DDS: ``AnalogParameterSpec.param_id`` in JSON ``device_rows[…]["frequency"]`` (Detuning MHz).
 _DDS_FREQUENCY_PARAM = "frequency"
@@ -65,14 +67,6 @@ class Sequencer_HERO(LocalHERO):
                 # Best-effort: the GUI will immediately push the authoritative document.
                 pass
 
-    def get_full_sequence(self, MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES):
-        total_steps = self.get_total_nb_steps()
-        sequence_data_delay = self.get_seq_delay_list(MAX_TOTAL_SEQUENCER_STEPS)
-        sequence_data_bool = self.get_seq_bool_array(MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES)
-        sequence_data_float = self.get_seq_float_array(MAX_TOTAL_SEQUENCER_STEPS, NB_DEVICES)
-
-        return total_steps, sequence_data_delay, sequence_data_bool, sequence_data_float
-
     def _sequence_snapshot(self) -> Dict[str, Any]:
         """Live JSON-shaped mapping; use this from all heros-exposed methods."""
         try:
@@ -120,6 +114,9 @@ class Sequencer_HERO(LocalHERO):
         Number of time slots in the flattened timeline (enabled blocks only, in block order);
         the value to use as ``length`` for :meth:`get_seq_float_list` / :meth:`get_seq_bool_list`
         when you want the full sequence with no padding.
+
+        With :meth:`get_seq_delay_list`, :meth:`get_seq_bool_array`, and :meth:`get_seq_float_array`,
+        this is the first of four calls to export the full padded sequence for ARTIQ/atomiq.
         """
         total = 0
         n_blocks = int(self.get_n_blocks())
@@ -146,6 +143,42 @@ class Sequencer_HERO(LocalHERO):
         order as ``labels``. Missing labels yield ``-1`` (see :meth:`get_row_index_by_label`).
         """
         return [self.get_row_index_by_label(lab) for lab in labels]
+
+    def _document_row_software(self) -> Tuple[str, ...]:
+        doc = self._sequence_snapshot().get("document", {})
+        rows = int(doc.get("rows", 0))
+        raw = doc.get("row_software", [])
+        if not isinstance(raw, list):
+            raw = []
+        if rows < 1:
+            rows = max(len(raw), 1)
+        return tuple(
+            raw[r] if r < len(raw) else DEFAULT_ON_OBJECT
+            for r in range(rows)
+        )
+
+    def _matrix_param_bindings(self) -> List[Tuple[int, str]]:
+        return list(matrix_param_bindings(self._document_row_software()))
+
+    def get_n_matrix_params(self) -> "numpy.int32":
+        """Number of analog parameter rows in the sequence matrix (not device-row count)."""
+        return numpy.int32(len(self._matrix_param_bindings()))
+
+    def get_matrix_param_device_row(self, param_index: "numpy.int32") -> "numpy.int32":
+        """Device row index for a matrix parameter index, or ``-1`` if out of range."""
+        bindings = self._matrix_param_bindings()
+        i = int(param_index)
+        if not (0 <= i < len(bindings)):
+            return numpy.int32(-1)
+        return numpy.int32(bindings[i][0])
+
+    def get_matrix_param_id(self, param_index: "numpy.int32") -> str:
+        """``param_id`` string for a matrix parameter index (e.g. ``frequency``), or ``""``."""
+        bindings = self._matrix_param_bindings()
+        i = int(param_index)
+        if not (0 <= i < len(bindings)):
+            return ""
+        return bindings[i][1]
 
     def get_seq_parameters_stale(self) -> bool:
         """
@@ -251,10 +284,47 @@ class Sequencer_HERO(LocalHERO):
             out.append(HOLD_SIGNAL)
         return out
 
-    def get_seq_float_array(self, length: int, nb_devices: int) -> List[float]:
-        out = [[HOLD_SIGNAL] * length for _ in range(nb_devices)]
-        for i in range(nb_devices):
-            out[i] = self.get_seq_float_list(length, i)
+    def get_seq_float_list_by_param_index(
+        self,
+        param_index: int,
+        length: int,
+    ) -> List[float]:
+        """
+        ``length``-element analog timeline for one sequence-matrix parameter row
+        (see :meth:`get_n_matrix_params`, :meth:`get_matrix_param_id`).
+        """
+        bindings = self._matrix_param_bindings()
+        if not (0 <= param_index < len(bindings)):
+            if length <= 0:
+                return []
+            return [HOLD_SIGNAL] * length
+        row, param_id = bindings[param_index]
+        return self.get_seq_float_list(param_id, length, row)
+
+    def get_seq_float_array(self, length: int, nb_params: int) -> List[List[float]]:
+        """
+        One ``length``-element timeline per sequence-matrix parameter index (0 …
+        :meth:`get_n_matrix_params` − 1), in the same order as analog rows in the GUI matrix.
+        Extra indices up to ``nb_params`` are padded with :data:`HOLD_SIGNAL`.
+
+        Use with :meth:`get_total_nb_steps`, :meth:`get_seq_delay_list`, and
+        :meth:`get_seq_bool_array` to export the full sequence (``length`` =
+        ``MAX_TOTAL_SEQUENCER_STEPS``, ``nb_params`` = ``MAX_NB_ANALOG_PARAMS``).
+        """
+        if nb_params < 0:
+            raise ValueError("nb_params must be non-negative")
+        if nb_params == 0:
+            return []
+        bindings = self._matrix_param_bindings()
+        out: List[List[float]] = []
+        for i in range(nb_params):
+            if i < len(bindings):
+                row, param_id = bindings[i]
+                out.append(self.get_seq_float_list(param_id, length, row))
+            elif length <= 0:
+                out.append([])
+            else:
+                out.append([HOLD_SIGNAL] * length)
         return out
 
     def get_seq_float_list_by_label(
@@ -281,6 +351,8 @@ class Sequencer_HERO(LocalHERO):
         ``length``-element ``delays_us`` timeline: same order as :meth:`get_seq_float_list` for a
         row. **Always** ``len == length``: long sequences are **truncated**; short ones are **padded**
         with ``fill_extra_delay_us`` (default ``1.0`` µs, a neutral one-microsecond step).
+
+        Second of four calls to export the full sequence (``length`` = ``MAX_TOTAL_SEQUENCER_STEPS``).
         """
         if length < 0:
             raise ValueError("length must be non-negative")
@@ -343,7 +415,13 @@ class Sequencer_HERO(LocalHERO):
             out.append(False)
         return out
 
-    def get_seq_bool_array(self, length: int, nb_devices: int) -> List[bool]:
+    def get_seq_bool_array(self, length: int, nb_devices: int) -> List[List[bool]]:
+        """
+        One ``length``-element digital timeline per device row (0 … ``nb_devices`` − 1).
+
+        Third of four calls to export the full sequence (``length`` = ``MAX_TOTAL_SEQUENCER_STEPS``,
+        ``nb_devices`` = ``MAX_NB_BOOL_PARAMS``).
+        """
         out = [[False] * length for _ in range(nb_devices)]
         for i in range(nb_devices):
             out[i] = self.get_seq_bool_list(length, i)
