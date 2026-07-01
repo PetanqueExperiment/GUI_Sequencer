@@ -5,6 +5,7 @@ from PyQt5.QtGui import QCloseEvent, QGuiApplication, QShowEvent
 from PyQt5.QtWidgets import QHBoxLayout, QMainWindow, QTabBar, QVBoxLayout, QWidget
 
 from sequencer_gui.app.state import COMPLETE_TAB_INDEX, SequenceAppState
+from sequencer_gui.git_info import current_git_branch
 from sequencer_gui.persistence import load_window_geometry, save_row_labels, save_window_geometry
 from sequencer_gui.ui.artiq_panel import ArtiqPanel
 from sequencer_gui.ui.block_strip import BlockStripWidget
@@ -18,6 +19,7 @@ class MainWindow(QMainWindow):
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state = state
+        self._git_branch = current_git_branch()
         self._update_window_title(state.sequence_name)
         state.sequence_name_changed.connect(self._update_window_title)
         self._geometry_restore_done = False
@@ -143,7 +145,10 @@ class MainWindow(QMainWindow):
             self._state.set_active_tab(index - 1)
 
     def _update_window_title(self, name: str) -> None:
-        self.setWindowTitle(f"{name} — ArtiQ experimental sequencer")
+        if self._git_branch:
+            self.setWindowTitle(f"{name} — git branch: {self._git_branch}")
+        else:
+            self.setWindowTitle(f"{name} — ArtiQ experimental sequencer")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._matrix.commit_row_labels_to_model()
