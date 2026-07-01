@@ -125,11 +125,15 @@ def sequence_tab_bar_stylesheet(
 
 def block_strip_card_stylesheet(accent: str, *, enabled: bool) -> str:
     r, g, b = _hex_rgb(accent)
-    bg_alpha = 0.32 if enabled else 0.14
-    border = accent if enabled else "#b0bec5"
+    if enabled:
+        bg = f"background-color: rgba({r}, {g}, {b}, 0.32);"
+        border = accent
+    else:
+        bg = "background-color: #bbbbbb;"
+        border = "#666666"
     return (
         "QFrame {"
-        f" background-color: rgba({r}, {g}, {b}, {bg_alpha});"
+        f" {bg}"
         f" border: 2px solid {border};"
         " border-radius: 6px;"
         " }"

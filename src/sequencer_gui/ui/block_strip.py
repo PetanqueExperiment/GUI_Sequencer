@@ -235,11 +235,9 @@ class BlockStripWidget(QGroupBox):
             btn_color.clicked.connect(make_pick_color(i, btn_color, frame))
             btn_color.setContextMenuPolicy(Qt.CustomContextMenu)
             btn_color.customContextMenuRequested.connect(make_color_menu(i))
-            row_name.addWidget(btn_color)
 
             edit = QLineEdit(b.name)
-            edit.setMinimumWidth(100)
-            edit.setMaximumWidth(100)
+            edit.setMinimumWidth(120)
             idx = i
 
             def make_finished(ii: int, e: QLineEdit):
@@ -251,6 +249,14 @@ class BlockStripWidget(QGroupBox):
             edit.editingFinished.connect(make_finished(idx, edit))
             row_name.addWidget(edit)
             row_name.addStretch(1)
+
+            btn_remove = QPushButton("\u00d7")
+            btn_remove.setFixedSize(22, 22)
+            btn_remove.setFlat(True)
+            btn_remove.setToolTip("Remove block")
+            btn_remove.setEnabled(len(doc.blocks) > 1)
+            btn_remove.clicked.connect(lambda checked=False, ii=idx: self._state.remove_block(ii))
+            row_name.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
             outer.addLayout(row_name)
 
             row_actions = QHBoxLayout()
@@ -258,7 +264,7 @@ class BlockStripWidget(QGroupBox):
 
             on_btn = QPushButton("On")
             on_btn.setCheckable(True)
-            on_btn.setMinimumWidth(48)
+            on_btn.setMinimumWidth(32)
 
             def make_toggled(ii: int, btn: QPushButton):
                 def on_toggled(checked: bool) -> None:
@@ -277,7 +283,8 @@ class BlockStripWidget(QGroupBox):
             row_actions.addWidget(QLabel("Steps:"))
             steps_edit = QLineEdit(str(b.cols))
             steps_edit.setValidator(QIntValidator(1, 9999, frame))
-            steps_edit.setFixedWidth(48)
+            steps_edit.setMinimumWidth(32)
+            steps_edit.setMaximumWidth(32)
             steps_edit.setToolTip("Number of time steps in this block")
 
             def make_steps_finished(ii: int, e: QLineEdit):
@@ -292,16 +299,8 @@ class BlockStripWidget(QGroupBox):
 
             steps_edit.editingFinished.connect(make_steps_finished(idx, steps_edit))
             row_actions.addWidget(steps_edit)
-
             row_actions.addStretch(1)
-
-            btn_remove = QPushButton("\u00d7")
-            btn_remove.setFixedSize(22, 22)
-            btn_remove.setFlat(True)
-            btn_remove.setToolTip("Remove block")
-            btn_remove.setEnabled(len(doc.blocks) > 1)
-            btn_remove.clicked.connect(lambda checked=False, ii=idx: self._state.remove_block(ii))
-            row_actions.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
+            row_actions.addWidget(btn_color, 0, Qt.AlignRight | Qt.AlignVCenter)
             outer.addLayout(row_actions)
 
             row.addWidget(frame)
