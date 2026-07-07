@@ -9,7 +9,7 @@ get the default per-row software object, all-on ``states``, and no explicit anal
 Missing ``device_rows[…]`` keys for an index in a block are treated the same for that row.
 
 Each **block** uses ``device_rows``: ``"0"`` … (device row index) -> ``{ "states": [ bool, … ], "frequency": [ … ], "amplitude": [ … ], … }`` —
-``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, or ``null`` (default). Reserved key: ``states`` only.
+``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, ``"ramp"``, or ``null`` (default). Reserved key: ``states`` only.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, ANALOG_RAMP, AnalogStored, is_holdish, is_rampish
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
 from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, SequenceModel
 from sequencer_gui.domain.static_defaults import (
@@ -34,12 +34,18 @@ FORMAT_VERSION = 8
 
 
 def _analog_to_json_value(v: AnalogStored) -> float | str:
-    return "hold" if is_holdish(v) else float(v)
+    if is_holdish(v):
+        return "hold"
+    if is_rampish(v):
+        return "ramp"
+    return float(v)
 
 
 def _analog_cell_from_json(raw: Any) -> AnalogStored:
     if raw == "hold":
         return ANALOG_HOLD
+    if raw == "ramp":
+        return ANALOG_RAMP
     try:
         return float(raw)
     except (TypeError, ValueError) as e:

@@ -4,15 +4,20 @@ from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
 from sequencer_gui.domain.analog_stored import (
-    ANALOG_HOLD,
     AnalogStored,
+    RAMP_SIGNAL,
     is_hold_signal,
     is_holdish,
+    is_ramp,
+    is_ramp_signal,
+    is_rampish,
+    normalize_analog_stored,
+    ramp_applies_to_software,
 )
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 # Change this to bump the number of device rows; older JSON is upscaled on load (see `sequence_io`).
-DEFAULT_DEVICE_ROWS: int = 35
+DEFAULT_DEVICE_ROWS: int = 36
 
 
 def matrix_param_bindings(row_software: Tuple[str, ...]) -> Tuple[Tuple[int, str], ...]:
@@ -89,11 +94,20 @@ class SequenceModel:
                 return float(p.default)
         return 0.0
 
+    def _ramp_applies(self, row: int) -> bool:
+        return ramp_applies_to_software(self.row_software_name(row))
+
     def analog_value(self, row: int, param_id: str, col: int) -> float:
-        """Resolved numeric value (hold → previous step or parameter default)."""
+        """Resolved numeric value (hold → previous step or default; ramp → :data:`RAMP_SIGNAL` on AOM/piezo only)."""
         key = (row, param_id, col)
         if key in self.analog:
             v = self.analog[key]
+            if is_ramp(v):
+                if self._ramp_applies(row):
+                    return float(RAMP_SIGNAL)
+                return self._default_analog_for_param(row, param_id)
+            if is_ramp_signal(v) and self._ramp_applies(row):
+                return float(RAMP_SIGNAL)
             if is_holdish(v):
                 if col <= 0:
                     return self._default_analog_for_param(row, param_id)
@@ -106,13 +120,20 @@ class SequenceModel:
         return 0.0
 
     def analog_display_text(self, row: int, param_id: str, col: int, *, decimals: int) -> str:
-        """Text shown in the cell: '-' for hold, else formatted resolved number."""
+        """Text shown in the cell: '-' for hold, 'ramp' for ramp (AOM/piezo only), else formatted resolved number."""
         key = (row, param_id, col)
-        if key in self.analog and is_holdish(self.analog[key]):
-            return "-"
+        ramp_ok = self._ramp_applies(row)
+        if key in self.analog:
+            stored = self.analog[key]
+            if is_holdish(stored):
+                return "-"
+            if ramp_ok and is_rampish(stored):
+                return "ramp"
         v = self.analog_value(row, param_id, col)
         if is_hold_signal(v):
             return "-"
+        if ramp_ok and is_ramp_signal(v):
+            return "ramp"
         return format(v, f".{decimals}f")
 
     def with_channel(self, row: int, col: int, on: bool) -> SequenceModel:
@@ -194,9 +215,7 @@ class SequenceModel:
         if not (0 <= row < self.rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = (
-            ANALOG_HOLD if is_holdish(value) else float(value)  # type: ignore[arg-type]
-        )
+        a[(row, param_id, col)] = normalize_analog_stored(value)
         return SequenceModel(
             rows=self.rows,
             cols=self.cols,

@@ -10,7 +10,7 @@ import numpy
 from heros import LocalHERO
 
 from sequencer_gui.process_identity import HERO_INSTANCE_NAME, PROCESS_DISPLAY_NAME, SOFTWARE_PID
-from sequencer_gui.domain.analog_stored import HOLD_SIGNAL
+from sequencer_gui.domain.analog_stored import HOLD_SIGNAL, RAMP_SIGNAL
 from sequencer_gui.domain.model import matrix_param_bindings
 from sequencer_gui.sequence_io import sequence_model_from_hero_block
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
@@ -205,9 +205,11 @@ class Sequencer_HERO(LocalHERO):
 
     @staticmethod
     def _coerce_seq_analog_float(value: Any) -> float:
-        """JSON cell: number, the string ``hold``, or ``null``; ``hold`` and ``null`` both become :data:`HOLD_SIGNAL`."""
+        """JSON cell: number, ``hold``, ``ramp``, or ``null``; hold/null → :data:`HOLD_SIGNAL`, ramp → :data:`RAMP_SIGNAL`."""
         if value == "hold":
             return HOLD_SIGNAL
+        if value == "ramp":
+            return RAMP_SIGNAL
         if value is None:
             return HOLD_SIGNAL
         return float(value)

@@ -176,7 +176,7 @@ class CommitFloatLineEdit(QLineEdit):
 
     def _try_arrow_step(self, direction: int) -> bool:
         s = self.text().strip()
-        if s in ("-", "\u2212"):
+        if s in ("-", "\u2212", "ramp"):
             return False
         try:
             v = float(s.replace(",", "."))

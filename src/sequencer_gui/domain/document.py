@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Dict, NamedTuple, Tuple
 
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD, AnalogStored, is_holdish
+from sequencer_gui.domain.analog_stored import AnalogStored, normalize_analog_stored
 from sequencer_gui.domain.model import SequenceModel
 from sequencer_gui.domain.static_defaults import (
     DEFAULT_STATIC_ROWS,
@@ -102,9 +102,7 @@ class SequenceBlock:
         if not (0 <= row < rows and 0 <= col < self.cols):
             raise IndexError("analog index out of range")
         a = dict(self.analog)
-        a[(row, param_id, col)] = (
-            ANALOG_HOLD if is_holdish(value) else float(value)  # type: ignore[arg-type]
-        )
+        a[(row, param_id, col)] = normalize_analog_stored(value)
         return self._copy(analog=a)
 
     def with_timeline_from_model(self, model: SequenceModel) -> SequenceBlock:

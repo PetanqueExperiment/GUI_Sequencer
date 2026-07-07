@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
 )
 
 from sequencer_gui.app.state import SequenceAppState
-from sequencer_gui.domain.analog_stored import ANALOG_HOLD
+from sequencer_gui.domain.analog_stored import ANALOG_HOLD, ANALOG_RAMP, ramp_applies_to_software
 from sequencer_gui.domain.document import MergedBlockSpan
 from sequencer_gui.domain.model import SequenceModel, matrix_param_base_index
 from sequencer_gui.software_objects import get_object
@@ -480,6 +480,13 @@ class DeviceRowWidget:
         if s in ("-", "\u2212"):
             self._state.set_analog(self._row, spec.param_id, col, ANALOG_HOLD)
             line.set_committed_display(self._state.model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
+            return
+        if s.lower() == "ramp":
+            if ramp_applies_to_software(model.row_software_name(self._row)):
+                self._state.set_analog(self._row, spec.param_id, col, ANALOG_RAMP)
+                line.set_committed_display(self._state.model.analog_display_text(self._row, spec.param_id, col, decimals=spec.decimals))
+            else:
+                revert()
             return
         if not s:
             revert()
