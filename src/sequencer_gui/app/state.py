@@ -18,7 +18,7 @@ from sequencer_gui.domain.document import (
     merge_blocks,
     merged_enabled_timeline_col_to_block,
 )
-from sequencer_gui.domain.model import SequenceModel
+from sequencer_gui.domain.model import DEFAULT_DELAY_US, SequenceModel
 from sequencer_gui.software_objects import get_object
 
 # Tab index -1 is the "Complete" view (enabled blocks concatenated); editable like per-block tabs.
@@ -275,7 +275,7 @@ class SequenceAppState(QObject):
             if b.is_delay:
                 key = (bi, local_col)
                 if key not in restore_delays:
-                    restore_delays[key] = block.delays_us.get(local_col, 0.0)
+                    restore_delays[key] = block.delays_us.get(local_col, DEFAULT_DELAY_US)
                 continue
             key = (b.row, bi, b.param_id, local_col)
             if key not in restore:

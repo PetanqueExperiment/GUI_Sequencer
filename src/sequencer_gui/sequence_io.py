@@ -5,11 +5,11 @@ Top-level: ``format`` / ``version`` (must match :data:`FORMAT_VERSION`) / ``name
 
 If a file has fewer top-level device ``rows`` than ``DEFAULT_DEVICE_ROWS`` in
 :mod:`sequencer_gui.domain.model`, it is **upgraded** on load: new rows
-get the default per-row software object, all-on ``states``, and no explicit analog (defaults apply).
+get the default per-row software object, all-off ``states``, and no explicit analog (hold applies).
 Missing ``device_rows[…]`` keys for an index in a block are treated the same for that row.
 
 Each **block** uses ``device_rows``: ``"0"`` … (device row index) -> ``{ "states": [ bool, … ], "frequency": [ … ], "amplitude": [ … ], … }`` —
-``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, ``"ramp"``, or ``null`` (default). Reserved key: ``states`` only.
+``states[s]`` is that device’s bool for time slot ``s``; each analog ``param_id`` (e.g. ``frequency``) is a sibling list: cell is a float, ``"hold"``, ``"ramp"``, or ``null`` (hold). Reserved key: ``states`` only.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import Any
 
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, ANALOG_RAMP, AnalogStored, is_holdish, is_rampish
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
-from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, SequenceModel
+from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, DEFAULT_DELAY_US, SequenceModel
 from sequencer_gui.domain.static_defaults import (
     DEFAULT_STATIC_ROWS,
     default_static_analog,
@@ -58,7 +58,7 @@ def _analog_param_lists_for_row(
     cols: int,
     row_software: tuple[str, ...],
 ) -> dict[str, list[Any]]:
-    """``param_id`` -> list of length ``cols`` (``null`` = default)."""
+    """``param_id`` -> list of length ``cols`` (``null`` = hold)."""
     if not (0 <= r < len(row_software)):
         return {}
     row_d: dict[str, list[Any]] = {}
@@ -83,7 +83,7 @@ def _device_rows_from_block(
     for r in range(rows):
         obj = get_object(row_software[r])
         if obj.has_on_off:
-            state_list = [bool(block.channels.get((r, c), True)) for c in range(block.cols)]
+            state_list = [bool(block.channels.get((r, c), False)) for c in range(block.cols)]
         else:
             state_list = [True] * block.cols
         an = _analog_param_lists_for_row(block.analog, r, block.cols, row_software)
@@ -106,8 +106,6 @@ def _parse_device_rows(
     for r in range(n_device_rows):
         skey = str(r)
         if skey not in device_rows:
-            for c in range(cols):
-                channels[(r, c)] = True
             continue
         row = device_rows[skey]
         if not isinstance(row, dict):
@@ -148,7 +146,7 @@ def _block_payload(block: SequenceBlock, document: SequenceDocument) -> dict[str
         "name": block.name,
         "enabled": block.enabled,
         "cols": block.cols,
-        "delays_us": [block.delays_us.get(c, 0.0) for c in range(block.cols)],
+        "delays_us": [block.delays_us.get(c, DEFAULT_DELAY_US) for c in range(block.cols)],
         "col_labels": [block.col_label(c) for c in range(block.cols)],
         "device_rows": _device_rows_from_block(block, rows, document.row_software),
     }

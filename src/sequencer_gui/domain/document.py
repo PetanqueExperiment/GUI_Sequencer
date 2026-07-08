@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import Dict, NamedTuple, Tuple
 
 from sequencer_gui.domain.analog_stored import AnalogStored, normalize_analog_stored
-from sequencer_gui.domain.model import SequenceModel
+from sequencer_gui.domain.model import DEFAULT_DELAY_US, SequenceModel
 from sequencer_gui.domain.static_defaults import (
     DEFAULT_STATIC_ROWS,
     default_static_analog,
@@ -312,7 +312,7 @@ def merge_blocks(doc: SequenceDocument, *, enabled_only: bool) -> SequenceModel:
     col_off = 0
     for b in use:
         for c in range(b.cols):
-            delays_us[col_off + c] = b.delays_us.get(c, 0.0)
+            delays_us[col_off + c] = b.delays_us.get(c, DEFAULT_DELAY_US)
             col_labels.append(b.col_label(c))
         for (r, c), v in b.channels.items():
             if 0 <= r < doc.rows and 0 <= c < b.cols:
@@ -409,7 +409,7 @@ def default_document(row_labels: Tuple[str, ...]) -> SequenceDocument:
 def complete_timeline_duration_us(doc: SequenceDocument) -> float:
     """Sum of per-step delays for the merged enabled-blocks timeline (runtime shape)."""
     model = merge_blocks(doc, enabled_only=True)
-    return sum(model.delay_us(c, 0.0) for c in range(model.cols))
+    return sum(model.delay_us(c) for c in range(model.cols))
 
 
 def complete_cycle_rate_hz(doc: SequenceDocument) -> float | None:

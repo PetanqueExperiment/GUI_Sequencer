@@ -353,7 +353,7 @@ class ChannelMatrix(QGroupBox):
         model = self._state.model
 
         def revert() -> None:
-            line.set_committed_display(_format_delay_us(model.delay_us(col, 0.0)))
+            line.set_committed_display(_format_delay_us(model.delay_us(col)))
 
         s = line.text().strip()
         if not s:
@@ -365,7 +365,7 @@ class ChannelMatrix(QGroupBox):
             return
         x = max(_DELAY_MIN_US, min(_DELAY_MAX_US, parsed))
         self._state.set_delay_us(col, x)
-        committed = self._state.model.delay_us(col, 0.0)
+        committed = self._state.model.delay_us(col)
         line.set_delay_us_value(committed)
         line.set_committed_display(_format_delay_us(committed))
 
@@ -628,7 +628,7 @@ class ChannelMatrix(QGroupBox):
                 _apply_block_column_hint(label_ed, accent, block_separator=block_separator)
             ts_grid.addWidget(label_ed, label_row, c)
 
-            delay_us = model.delay_us(c, 0.0)
+            delay_us = model.delay_us(c)
             ed = _DelayUsLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
             ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
             ed.set_block_column_context(accent, block_separator=block_separator)
@@ -841,7 +841,7 @@ class ChannelMatrix(QGroupBox):
         for c, ed in enumerate(self._delay_edits):
             if c >= model.cols:
                 break
-            v = model.delay_us(c, 0.0)
+            v = model.delay_us(c)
             ed.set_delay_us_value(v)
             ed.set_committed_display(_format_delay_us(v))
         for dr in self._device_rows:

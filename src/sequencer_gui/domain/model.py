@@ -18,6 +18,7 @@ from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 # Change this to bump the number of device rows; older JSON is upscaled on load (see `sequence_io`).
 DEFAULT_DEVICE_ROWS: int = 36
+DEFAULT_DELAY_US: float = 1.0
 
 
 def matrix_param_bindings(row_software: Tuple[str, ...]) -> Tuple[Tuple[int, str], ...]:
@@ -113,22 +114,21 @@ class SequenceModel:
                     return self._default_analog_for_param(row, param_id)
                 return self.analog_value(row, param_id, col - 1)
             return float(v)
-        obj = get_object(self.row_software_name(row))
-        for p in obj.analog_parameters:
-            if p.param_id == param_id:
-                return float(p.default)
-        return 0.0
+        if col <= 0:
+            return self._default_analog_for_param(row, param_id)
+        return self.analog_value(row, param_id, col - 1)
 
     def analog_display_text(self, row: int, param_id: str, col: int, *, decimals: int) -> str:
         """Text shown in the cell: '-' for hold, 'ramp' for ramp (AOM/piezo only), else formatted resolved number."""
         key = (row, param_id, col)
         ramp_ok = self._ramp_applies(row)
-        if key in self.analog:
-            stored = self.analog[key]
-            if is_holdish(stored):
-                return "-"
-            if ramp_ok and is_rampish(stored):
-                return "ramp"
+        if key not in self.analog:
+            return "-"
+        stored = self.analog[key]
+        if is_holdish(stored):
+            return "-"
+        if ramp_ok and is_rampish(stored):
+            return "ramp"
         v = self.analog_value(row, param_id, col)
         if is_hold_signal(v):
             return "-"
@@ -243,5 +243,5 @@ class SequenceModel:
             row_software=self.row_software,
         )
 
-    def delay_us(self, col: int, default: float = 10.0) -> float:
+    def delay_us(self, col: int, default: float = DEFAULT_DELAY_US) -> float:
         return self.delays_us.get(col, default)
