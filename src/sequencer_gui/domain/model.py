@@ -17,7 +17,7 @@ from sequencer_gui.domain.analog_stored import (
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
 
 # Change this to bump the number of device rows; older JSON is upscaled on load (see `sequence_io`).
-DEFAULT_DEVICE_ROWS: int = 36
+DEFAULT_DEVICE_ROWS: int = 43
 DEFAULT_DELAY_US: float = 1.0
 
 
