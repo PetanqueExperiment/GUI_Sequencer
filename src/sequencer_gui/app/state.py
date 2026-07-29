@@ -93,6 +93,7 @@ class SequenceAppState(QObject):
         # Cells touched during a scan; restored when the scan ends or is interrupted.
         self._scan_restore: dict[tuple[int, int, str, int], AnalogStored] | None = None
         self._scan_restore_delays: dict[tuple[int, int], float] | None = None
+        self._scan_restore_static: dict[tuple[int, str], float] | None = None
         self._notify_backend()
         self._backend.sync_run_sequence(False)
 
@@ -266,30 +267,41 @@ class SequenceAppState(QObject):
         bindings = resolve_scan_bindings(self._document, self._scan_parameters)
         restore: dict[tuple[int, int, str, int], AnalogStored] = {}
         restore_delays: dict[tuple[int, int], float] = {}
+        restore_static: dict[tuple[int, str], float] = {}
         for b in bindings:
+            if b.is_static:
+                key = (b.row, b.param_id)
+                if key not in restore_static:
+                    restore_static[key] = self._document.static_value(b.row, b.param_id)
+                continue
             resolved = merged_enabled_timeline_col_to_block(self._document, b.merged_col)
             if resolved is None:
                 continue
             bi, local_col = resolved
             block = self._document.blocks[bi]
             if b.is_delay:
-                key = (bi, local_col)
-                if key not in restore_delays:
-                    restore_delays[key] = block.delays_us.get(local_col, DEFAULT_DELAY_US)
+                key_d = (bi, local_col)
+                if key_d not in restore_delays:
+                    restore_delays[key_d] = block.delays_us.get(local_col, DEFAULT_DELAY_US)
                 continue
             key = (b.row, bi, b.param_id, local_col)
             if key not in restore:
                 restore[key] = block.analog.get((b.row, b.param_id, local_col), "hold")
         self._scan_restore = restore
         self._scan_restore_delays = restore_delays
+        self._scan_restore_static = restore_static
 
     def restore_scan_matrix(self) -> None:
-        """Put scan-touched analog cells and delays back to their pre-scan values."""
+        """Put scan-touched analog cells, delays, and static values back to pre-scan values."""
+        from sequencer_gui.static_remote import push_document_static_to_remote
+
         analog_restore = self._scan_restore or {}
         delay_restore = self._scan_restore_delays or {}
-        if not analog_restore and not delay_restore:
+        static_restore = self._scan_restore_static or {}
+        if not analog_restore and not delay_restore and not static_restore:
             self._scan_restore = None
             self._scan_restore_delays = None
+            self._scan_restore_static = None
             return
         doc = self._document
         for (row, bi, param_id, local_col), stored in analog_restore.items():
@@ -301,21 +313,42 @@ class SequenceAppState(QObject):
         for (bi, local_col), value_us in delay_restore.items():
             block = doc.blocks[bi]
             doc = doc.with_block(bi, block.with_delay_us(local_col, value_us))
+        for (row, param_id), value in static_restore.items():
+            doc = doc.with_static_value(row, param_id, float(value))
         self._scan_restore = None
         self._scan_restore_delays = None
+        self._scan_restore_static = None
         if doc is not self._document:
             self._commit_document(doc)
             if analog_restore:
                 self.analog_changed.emit()
             if delay_restore:
                 self.delays_changed.emit()
+            if static_restore:
+                self.static_changed.emit()
+        # Push restored remote statics after the document is authoritative again.
+        for (row, param_id), value in static_restore.items():
+            push_document_static_to_remote(self._document, row, param_id, float(value))
 
     def apply_scan_point(self, point: ScanPoint) -> None:
-        """Write one scan step into the sequence document (enabled-blocks timeline)."""
+        """Write one scan step into the sequence document; push remote statics when needed.
+
+        Raises ``RuntimeError`` if a remote static apply fails (document may already be updated).
+        """
+        from sequencer_gui.static_remote import push_document_static_to_remote
+
         doc = self._document
         analog_touched = False
         delays_touched = False
+        static_touched = False
+        static_applies: list[tuple[int, str, float]] = []
         for binding, value in zip(point.bindings, point.values):
+            if binding.is_static:
+                v = float(value)
+                doc = doc.with_static_value(binding.row, binding.param_id, v)
+                static_touched = True
+                static_applies.append((binding.row, binding.param_id, v))
+                continue
             resolved = merged_enabled_timeline_col_to_block(doc, binding.merged_col)
             if resolved is None:
                 continue
@@ -338,6 +371,23 @@ class SequenceAppState(QObject):
                 self.analog_changed.emit()
             if delays_touched:
                 self.delays_changed.emit()
+            if static_touched:
+                self.static_changed.emit()
+
+        failures: list[str] = []
+        for row, param_id, value in static_applies:
+            result = push_document_static_to_remote(self._document, row, param_id, value)
+            if result is None:
+                continue
+            if not result.ok:
+                hero = self._document.static_hero_name(row)
+                failures.append(
+                    f"{hero}.{param_id}={value:g}: {result.error or 'apply failed'}"
+                )
+        if failures:
+            raise RuntimeError(
+                "Remote static apply failed:\n" + "\n".join(failures)
+            )
 
     def build_scan_points(self) -> list:
         from sequencer_gui.scan_plan import build_scan_points
@@ -455,6 +505,18 @@ class SequenceAppState(QObject):
 
     def set_static_value(self, row: int, param_id: str, value: float) -> None:
         self._commit_document(self._document.with_static_value(row, param_id, value))
+        self.static_changed.emit()
+
+    def add_static_device(self, object_id: str | None = None) -> None:
+        """Append a static device row and sync the live sequence snapshot."""
+        self._commit_document(self._document.with_added_static_row(object_id))
+        self.static_changed.emit()
+
+    def remove_static_device(self, row: int) -> None:
+        """Remove a static device row and sync the live sequence snapshot."""
+        if not (0 <= row < self._document.static_rows):
+            return
+        self._commit_document(self._document.with_removed_static_row(row))
         self.static_changed.emit()
 
     def set_block_name(self, block_index: int, name: str) -> None:

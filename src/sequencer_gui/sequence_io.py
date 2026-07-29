@@ -168,7 +168,9 @@ def _static_payload(document: SequenceDocument) -> dict[str, Any]:
     }
 
 
-def _parse_static_payload(data: Any) -> tuple[int, tuple[str, ...], tuple[str, ...], dict[tuple[int, str], float]]:
+def _parse_static_payload(
+    data: Any,
+) -> tuple[int, tuple[str, ...], tuple[str, ...], dict[tuple[int, str], float]]:
     if not isinstance(data, dict):
         rows = DEFAULT_STATIC_ROWS
         return (
@@ -193,6 +195,20 @@ def _parse_static_payload(data: Any) -> tuple[int, tuple[str, ...], tuple[str, .
             labels = labels + default_static_labels(rows)[len(labels) :]
     else:
         labels = default_static_labels(rows)
+
+    # Older files stored a separate hero_names list; prefer those as labels for remotes
+    # when the label slot is empty.
+    raw_heroes = data.get("hero_names")
+    if isinstance(raw_heroes, list) and raw_heroes:
+        fixed: list[str] = list(labels)
+        while len(fixed) < rows:
+            fixed.append("")
+        for i in range(rows):
+            if fixed[i].strip():
+                continue
+            if i < len(raw_heroes) and str(raw_heroes[i]).strip():
+                fixed[i] = str(raw_heroes[i]).strip()
+        labels = tuple(fixed)
 
     raw_sw = data.get("software")
     if isinstance(raw_sw, list) and raw_sw:
@@ -343,7 +359,9 @@ def document_from_payload(data: dict[str, Any]) -> SequenceDocument:
     )
 
     blocks = tuple(_block_from_payload(b, rows, row_software) for b in raw_blocks)
-    static_rows, static_labels, static_software, static_analog = _parse_static_payload(data.get("static"))
+    static_rows, static_labels, static_software, static_analog = _parse_static_payload(
+        data.get("static")
+    )
     return SequenceDocument(
         rows=rows,
         row_labels=labels,

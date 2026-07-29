@@ -12,6 +12,12 @@ from sequencer_gui.domain.static_defaults import (
     default_static_software,
 )
 from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object, get_static_object
+from sequencer_gui.software_objects.static.registry import (
+    CATALOG_ORDER as STATIC_CATALOG_ORDER,
+    default_hero_name_for,
+    is_remote_static,
+)
+from sequencer_gui.software_objects.static.voa import VOA_ID
 
 
 @dataclass(frozen=True)
@@ -175,6 +181,15 @@ class SequenceDocument:
     def static_software_name(self, row: int) -> str:
         return self.static_software[row]
 
+    def static_is_remote(self, row: int) -> bool:
+        return is_remote_static(self.static_software_name(row))
+
+    def static_hero_name(self, row: int) -> str:
+        """Remote HERO instance name = device label; empty if the row is local-only."""
+        if not self.static_is_remote(row):
+            return ""
+        return self.static_label(row).strip()
+
     def static_value(self, row: int, param_id: str) -> float:
         """Resolved static value (one number for the whole sequence)."""
         key = (row, param_id)
@@ -216,6 +231,46 @@ class SequenceDocument:
             if r == row and pid not in valid_ids:
                 del a[key]
         return replace(self, static_software=tuple(lst), static_analog=a)
+
+    def with_added_static_row(self, object_id: str | None = None) -> SequenceDocument:
+        """Append one static device row (defaults from the software object catalog)."""
+        oid = (object_id or "").strip() or (
+            STATIC_CATALOG_ORDER[0] if STATIC_CATALOG_ORDER else VOA_ID
+        )
+        obj = get_static_object(oid)
+        row = self.static_rows
+        # Remotes: label is the HERO instance name. Locals: typed display label.
+        hero_default = default_hero_name_for(oid)
+        label = hero_default if hero_default else f"{obj.display_name} {row + 1}"
+        analog = dict(self.static_analog)
+        for p in obj.analog_parameters:
+            analog[(row, p.param_id)] = float(p.default)
+        return replace(
+            self,
+            static_rows=row + 1,
+            static_labels=self.static_labels + (label,),
+            static_software=self.static_software + (oid,),
+            static_analog=analog,
+        )
+
+    def with_removed_static_row(self, row: int) -> SequenceDocument:
+        """Remove one static device row and reindex remaining analog values."""
+        if not (0 <= row < self.static_rows):
+            raise IndexError("static row index out of range")
+        labels = tuple(v for i, v in enumerate(self.static_labels) if i != row)
+        software = tuple(v for i, v in enumerate(self.static_software) if i != row)
+        analog: Dict[Tuple[int, str], float] = {}
+        for (r, pid), val in self.static_analog.items():
+            if r == row:
+                continue
+            analog[(r - 1 if r > row else r, pid)] = val
+        return replace(
+            self,
+            static_rows=self.static_rows - 1,
+            static_labels=labels,
+            static_software=software,
+            static_analog=analog,
+        )
 
     def with_block(self, index: int, block: SequenceBlock) -> SequenceDocument:
         if not (0 <= index < len(self.blocks)):

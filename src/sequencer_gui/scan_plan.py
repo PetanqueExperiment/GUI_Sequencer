@@ -13,11 +13,14 @@ from sequencer_gui.domain.document import (
     merge_blocks,
     merged_enabled_timeline_col_to_block,
 )
-from sequencer_gui.software_objects import get_object
+from sequencer_gui.software_objects import get_object, get_static_object
 
 # Device field aliases for scanning per-step delay (µs) instead of an analog parameter.
 _DELAY_SCAN_DEVICES = frozenset({"time", "t"})
 _DELAY_SCAN_PARAM_ID = "time"
+
+# Timestep field value when the scan axis is a between-shot static device.
+STATIC_TIMESTEP_LABEL = "static"
 
 # Tag layout: ``device+param+value`` per axis, axes joined with ``;`` (Windows-safe paths).
 _SCAN_TAG_PART_SEP = "+"
@@ -26,6 +29,21 @@ _SCAN_TAG_AXIS_SEP = ";"
 
 def is_delay_scan_device(device_label: str) -> bool:
     return device_label.strip().lower() in _DELAY_SCAN_DEVICES
+
+
+def static_row_for_label(document: SequenceDocument, device_label: str) -> int | None:
+    """Static-row index for an exact (stripped) label match, or ``None``."""
+    label = device_label.strip()
+    if not label:
+        return None
+    for i, lab in enumerate(document.static_labels):
+        if lab.strip() == label:
+            return i
+    return None
+
+
+def is_static_scan_device(document: SequenceDocument, device_label: str) -> bool:
+    return static_row_for_label(document, device_label) is not None
 
 
 def _scan_axis_label(p: ScanParameter) -> str:
@@ -110,12 +128,13 @@ def expected_shot_count(parameters: tuple[ScanParameter, ...], repetitions: int)
 
 @dataclass(frozen=True)
 class ScanCellBinding:
-    """One matrix cell in the merged enabled-blocks timeline."""
+    """One matrix cell in the merged enabled-blocks timeline, or a static row."""
 
     row: int
     param_id: str
     merged_col: int
     is_delay: bool = False
+    is_static: bool = False
 
 
 @dataclass(frozen=True)
@@ -147,7 +166,7 @@ def merged_col_for_timestep_label(document: SequenceDocument, timestep_label: st
 def resolve_scan_bindings(
     document: SequenceDocument, parameters: tuple[ScanParameter, ...]
 ) -> tuple[ScanCellBinding, ...]:
-    """Validate scan cards and return one matrix cell per parameter axis."""
+    """Validate scan cards and return one binding per parameter axis."""
     if not parameters:
         return ()
     bindings: list[ScanCellBinding] = []
@@ -155,9 +174,30 @@ def resolve_scan_bindings(
         device = p.device_label.strip()
         if not device:
             raise ValueError(
-                "Each scan parameter needs a device row label, or "
+                "Each scan parameter needs a device row label, a static device name, or "
                 f"{' / '.join(sorted(_DELAY_SCAN_DEVICES))} to scan timestep duration."
             )
+        static_row = static_row_for_label(document, device)
+        if static_row is not None:
+            param_id = (p.param_id or "").strip()
+            if not param_id:
+                raise ValueError(f"Select an analog parameter for static device {device!r}.")
+            obj = get_static_object(document.static_software_name(static_row))
+            if param_id not in {spec.param_id for spec in obj.analog_parameters}:
+                raise ValueError(
+                    f"Parameter {param_id!r} is not valid for static device {device!r} "
+                    f"({obj.display_name})."
+                )
+            bindings.append(
+                ScanCellBinding(
+                    row=static_row,
+                    param_id=param_id,
+                    merged_col=-1,
+                    is_static=True,
+                )
+            )
+            continue
+
         merged_col = merged_col_for_timestep_label(document, p.timestep_label)
         if merged_col is None:
             raise ValueError(
@@ -243,6 +283,9 @@ def document_with_scan_point(document: SequenceDocument, point: ScanPoint) -> Se
     """Copy of ``document`` with one scan step applied (does not mutate the original)."""
     doc = document
     for binding, value in zip(point.bindings, point.values):
+        if binding.is_static:
+            doc = doc.with_static_value(binding.row, binding.param_id, float(value))
+            continue
         resolved = merged_enabled_timeline_col_to_block(doc, binding.merged_col)
         if resolved is None:
             continue

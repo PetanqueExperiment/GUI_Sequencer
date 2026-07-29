@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         self._matrix = ChannelMatrix(state)
         matrix_row_layout.addWidget(self._matrix, 1)
         self._static_panel = StaticParametersPanel(state)
-        matrix_row_layout.addWidget(self._static_panel, 0, Qt.AlignTop)
+        matrix_row_layout.addWidget(self._static_panel, 0)
         layout.addWidget(matrix_row, 1)
 
         state.document_changed.connect(self._sync_tab_titles)

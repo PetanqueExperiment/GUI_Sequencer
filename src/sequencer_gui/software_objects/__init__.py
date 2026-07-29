@@ -9,7 +9,10 @@ from sequencer_gui.software_objects.dynamical.registry import (
 )
 from sequencer_gui.software_objects.static.registry import (
     CATALOG_ORDER as STATIC_CATALOG_ORDER,
+    apply_abs_tol_for,
+    default_hero_name_for,
     get_object as get_static_object,
+    is_remote_static,
     iter_objects as iter_static_objects,
     register as register_static,
 )
@@ -24,8 +27,11 @@ __all__ = [
     "CATALOG_ORDER",
     "DEFAULT_ON_OBJECT",
     "STATIC_CATALOG_ORDER",
+    "apply_abs_tol_for",
+    "default_hero_name_for",
     "get_object",
     "get_static_object",
+    "is_remote_static",
     "iter_objects",
     "iter_static_objects",
     "register",

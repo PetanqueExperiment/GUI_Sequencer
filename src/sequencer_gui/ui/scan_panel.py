@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from PyQt5.QtCore import Qt, QStringListModel, QTimer
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
@@ -24,22 +22,22 @@ from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME
 from sequencer_gui.pycam_repository import ScanLabelAvailability, classify_scan_label
 from sequencer_gui.pycam_experiment import (
     prepare_and_start_experiment,
-    set_parameter_scan_order,
     shots_seen,
     stop_experiment_if_running,
 )
 from sequencer_gui.scan_plan import (
+    STATIC_TIMESTEP_LABEL,
     anticipated_scan_duration_s,
     build_scan_tags,
     format_duration_hms,
     is_delay_scan_device,
+    is_static_scan_device,
     resolve_scan_bindings,
+    static_row_for_label,
 )
 from sequencer_gui.domain.model import matrix_param_bindings
-from sequencer_gui.software_objects import get_object
+from sequencer_gui.software_objects import get_object, get_static_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
-
-_PYCAM_PREP_DELAY_S = 0.3
 
 _LABEL_STYLE_DEFAULT = "color: #212121;"
 _LABEL_STYLE_BY_AVAILABILITY = {
@@ -141,6 +139,7 @@ class ScanPanel(QGroupBox):
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
         state.scan_parameters_changed.connect(self._rebuild_param_cards)
         state.row_labels_changed.connect(self._rebuild_param_cards)
+        state.static_labels_changed.connect(self._rebuild_param_cards)
         state.document_changed.connect(lambda _doc: self._rebuild_param_cards())
         state.scan_running_changed.connect(self._apply_scan_running_ui)
         state.scan_running_changed.connect(lambda _running: self._update_label_color())
@@ -254,8 +253,6 @@ class ScanPanel(QGroupBox):
             QMessageBox.warning(self, "Start scan", "Sequence did not pause.")
             return
 
-        time.sleep(_PYCAM_PREP_DELAY_S)
-
         try:
             from heros import RemoteHERO
         except ImportError:
@@ -267,8 +264,7 @@ class ScanPanel(QGroupBox):
             return
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as pycam_hero:
-                set_parameter_scan_order(pycam_hero, scan_tags)
-                prepare_and_start_experiment(pycam_hero, name)
+                prepare_and_start_experiment(pycam_hero, name, scan_tags=scan_tags)
         except Exception as e:
             QMessageBox.warning(
                 self,
@@ -291,7 +287,12 @@ class ScanPanel(QGroupBox):
         self._scan_step_index = step_index
         if self._state.run_sequence:
             self._state.set_run_sequence(False)
-        self._state.apply_scan_point(self._scan_points[step_index])
+        try:
+            self._state.apply_scan_point(self._scan_points[step_index])
+        except RuntimeError as e:
+            QMessageBox.warning(self, "Scan", str(e))
+            self._finish_scan()
+            return
         self._state.resume_sequence_for_scan_shots(self._scan_repetitions)
 
     def _advance_scan_if_ready(self, shots_seen_count: int) -> None:
@@ -441,18 +442,26 @@ class ScanPanel(QGroupBox):
             combo.blockSignals(False)
             return "time"
         combo.setEnabled(True)
-        row = self._row_index_for_device_label(device_label)
         param_id = selected_param_id
-        bindings = matrix_param_bindings(self._state.document.row_software)
-        if row is not None:
-            obj = get_object(self._state.document.row_software[row])
-            for spec in obj.analog_parameters:
-                label = spec.label
-                for pi, (br, pid) in enumerate(bindings):
-                    if br == row and pid == spec.param_id:
-                        label = f"{spec.label}"
-                        break
-                combo.addItem(label, spec.param_id)
+        doc = self._state.document
+        if is_static_scan_device(doc, device_label):
+            srow = static_row_for_label(doc, device_label)
+            if srow is not None:
+                obj = get_static_object(doc.static_software_name(srow))
+                for spec in obj.analog_parameters:
+                    combo.addItem(spec.label, spec.param_id)
+        else:
+            row = self._row_index_for_device_label(device_label)
+            bindings = matrix_param_bindings(doc.row_software)
+            if row is not None:
+                obj = get_object(doc.row_software[row])
+                for spec in obj.analog_parameters:
+                    label = spec.label
+                    for pi, (br, pid) in enumerate(bindings):
+                        if br == row and pid == spec.param_id:
+                            label = f"{spec.label}"
+                            break
+                    combo.addItem(label, spec.param_id)
         if combo.count() > 0:
             idx = combo.findData(param_id) if param_id else -1
             if idx < 0:
@@ -464,6 +473,28 @@ class ScanPanel(QGroupBox):
             param_id = ""
         combo.blockSignals(False)
         return param_id
+
+    def _apply_timestep_field_mode(self, edit: QLineEdit, *, static: bool) -> None:
+        if static:
+            edit.blockSignals(True)
+            edit.setText(STATIC_TIMESTEP_LABEL)
+            edit.blockSignals(False)
+            edit.setReadOnly(True)
+            edit.setPlaceholderText(STATIC_TIMESTEP_LABEL)
+            edit.setToolTip("Static devices apply between shots; no timestep.")
+            edit.setStyleSheet("background-color: #e0e0e0; color: #616161;")
+            edit.setCompleter(None)
+        else:
+            edit.setReadOnly(False)
+            edit.setPlaceholderText("Timestep label")
+            edit.setToolTip(
+                "Label of the timestep this parameter drives. "
+                "Enter a 0-based column index and press Enter to fill the label."
+            )
+            edit.setStyleSheet("")
+            edit.setCompleter(
+                QCompleter(QStringListModel(list(self._state.model.col_labels)), edit)
+            )
 
     def _make_param_card(self, index: int, p: ScanParameter) -> QFrame:
         frame = QFrame()
@@ -486,13 +517,17 @@ class ScanPanel(QGroupBox):
         top.addWidget(btn_remove, 0, Qt.AlignLeft | Qt.AlignVCenter)
 
         device_labels = list(self._state.document.row_labels)
+        for lab in self._state.document.static_labels:
+            name = lab.strip()
+            if name and name not in device_labels:
+                device_labels.append(name)
         for alias in ("time", "t"):
             if alias not in device_labels:
                 device_labels.append(alias)
         device_edit = QLineEdit(p.device_label)
-        device_edit.setPlaceholderText("Device or time")
+        device_edit.setPlaceholderText("Device, static, or time")
         device_edit.setToolTip(
-            "Row label of the device in the sequence, or time / t to scan the "
+            "Sequence row label, static device name, or time / t to scan the "
             "selected timestep duration (µs). "
             "Enter a 0-based matrix parameter index (# column on analog rows) "
             "and press Enter to fill device and parameter."
@@ -508,10 +543,18 @@ class ScanPanel(QGroupBox):
         if current_param_id != p.param_id:
             self._state.set_scan_parameter_param_id(index, current_param_id)
 
+        timestep_edit = QLineEdit(p.timestep_label)
+        timestep_edit.setMinimumWidth(100)
+        is_static = is_static_scan_device(self._state.document, p.device_label)
+        self._apply_timestep_field_mode(timestep_edit, static=is_static)
+        if is_static and p.timestep_label != STATIC_TIMESTEP_LABEL:
+            self._state.set_scan_parameter_timestep_label(index, STATIC_TIMESTEP_LABEL)
+
         def on_device_edited(
             idx: int = index,
             dev: QLineEdit = device_edit,
             combo: _NoWheelComboBox = param_combo,
+            ts: QLineEdit = timestep_edit,
         ) -> None:
             raw = dev.text().strip()
             if is_delay_scan_device(raw):
@@ -532,6 +575,16 @@ class ScanPanel(QGroupBox):
             new_param_id = self._populate_param_combo(combo, label, param_id)
             if new_param_id != self._state.scan_parameters[idx].param_id:
                 self._state.set_scan_parameter_param_id(idx, new_param_id)
+            static = is_static_scan_device(self._state.document, label)
+            self._apply_timestep_field_mode(ts, static=static)
+            if static:
+                if self._state.scan_parameters[idx].timestep_label != STATIC_TIMESTEP_LABEL:
+                    self._state.set_scan_parameter_timestep_label(idx, STATIC_TIMESTEP_LABEL)
+            elif self._state.scan_parameters[idx].timestep_label == STATIC_TIMESTEP_LABEL:
+                self._state.set_scan_parameter_timestep_label(idx, "")
+                ts.blockSignals(True)
+                ts.setText("")
+                ts.blockSignals(False)
 
         device_edit.editingFinished.connect(on_device_edited)
         top.addWidget(device_edit, 1)
@@ -541,18 +594,9 @@ class ScanPanel(QGroupBox):
         )
         top.addWidget(param_combo, 0)
 
-        timestep_edit = QLineEdit(p.timestep_label)
-        timestep_edit.setPlaceholderText("Timestep label")
-        timestep_edit.setMinimumWidth(100)
-        timestep_edit.setToolTip(
-            "Label of the timestep this parameter drives. "
-            "Enter a 0-based column index and press Enter to fill the label."
-        )
-        timestep_edit.setCompleter(
-            QCompleter(QStringListModel(list(self._state.model.col_labels)), timestep_edit)
-        )
-
         def on_timestep_edited(idx: int = index, edit: QLineEdit = timestep_edit) -> None:
+            if edit.isReadOnly():
+                return
             label = self._timestep_label_from_field_text(edit.text())
             if label != edit.text().strip():
                 edit.blockSignals(True)

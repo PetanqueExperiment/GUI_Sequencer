@@ -9,10 +9,14 @@ VOA_ID = "voa"
 
 @dataclass(frozen=True)
 class VoaObject:
-    """Between-shot VOA: one amplitude (V) for the full sequence (not per timeline step)."""
+    """Between-shot VOA: one amplitude (V) for the full sequence (not per timeline step).
+
+    Local-only: values live in the sequence document; never pushed to a remote HERO.
+    """
 
     id: str = VOA_ID
     display_name: str = "VOA"
+    default_hero_name: str | None = None
 
     @property
     def has_on_off(self) -> bool:
