@@ -26,6 +26,5 @@ class DdsObject:
                 minimum=-1000.0,
                 maximum=1000.0,
                 decimals=3,
-                single_step=0.001,
             ),
         )

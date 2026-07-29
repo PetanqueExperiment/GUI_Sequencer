@@ -27,7 +27,6 @@ class RfSourceObject:
                 minimum=0.0,
                 maximum=1.0,
                 decimals=3,
-                single_step=0.0001,
             ),
             AnalogParameterSpec(
                 param_id="frequency",
@@ -35,7 +34,6 @@ class RfSourceObject:
                 default=HOLD_SIGNAL,
                 minimum=-9998.0,
                 maximum=10000.0,
-                decimals=1, 
-                single_step=0.001,
+                decimals=1,
             ),
         )

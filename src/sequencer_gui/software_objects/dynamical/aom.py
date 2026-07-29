@@ -27,6 +27,5 @@ class AomObject:
                 minimum=0.0,
                 maximum=1.0,
                 decimals=3,
-                single_step=0.0001,
             ),
         )

@@ -28,6 +28,5 @@ class VoaObject:
                 minimum=0.0,
                 maximum=5.0,
                 decimals=3,
-                single_step=0.01,
             ),
         )

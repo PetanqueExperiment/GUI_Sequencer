@@ -27,6 +27,5 @@ class PiezoObject:
                 minimum=0.0,
                 maximum=9.9,
                 decimals=2,
-                single_step=0.0001,
             ),
         )

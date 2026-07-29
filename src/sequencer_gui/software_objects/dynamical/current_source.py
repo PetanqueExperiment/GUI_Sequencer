@@ -27,6 +27,5 @@ class CurrentSourceObject:
                 minimum=0.0,
                 maximum=9.99,
                 decimals=3,
-                single_step=0.1,
             ),
         )

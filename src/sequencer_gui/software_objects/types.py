@@ -11,4 +11,3 @@ class AnalogParameterSpec:
     minimum: float = -1000.0
     maximum: float = 1000.0
     decimals: int = 4
-    single_step: float = 0.0001
