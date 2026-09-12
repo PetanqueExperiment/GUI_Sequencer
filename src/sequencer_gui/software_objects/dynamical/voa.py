@@ -26,6 +26,6 @@ class VoaObject:
                 default=HOLD_SIGNAL,
                 minimum=0.0,
                 maximum=5.0,
-                decimals=1,
+                decimals=3,
             ),
         )

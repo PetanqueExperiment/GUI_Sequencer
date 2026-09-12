@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
@@ -89,6 +91,13 @@ class SequenceToolbar(QGroupBox):
         btn_load = QPushButton("Load…")
         btn_load.clicked.connect(self._on_load)
         actions_row.addWidget(btn_load)
+
+        btn_view = QPushButton("View…")
+        btn_view.setToolTip(
+            "Open a sequence file in the read-only Sequence Viewer (separate window)."
+        )
+        btn_view.clicked.connect(self._on_view)
+        actions_row.addWidget(btn_view)
         actions_row.addStretch(1)
         outer.addLayout(actions_row)
         outer.addStretch(1)
@@ -225,3 +234,40 @@ class SequenceToolbar(QGroupBox):
         save_last_sequence_path(resolved)
         self._state.set_sequence_name(resolved)
         self._state.replace_document(document, active_tab=0)
+
+    def _current_sequence_file(self) -> Path | None:
+        raw = self._name.text().strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        if p.suffix.lower() == ".json" and p.is_file():
+            return p.resolve()
+        return None
+
+    def _on_view(self) -> None:
+        start = str(Path.home())
+        current = self._current_sequence_file()
+        if current is not None:
+            start = str(current.parent)
+        else:
+            raw = self._name.text().strip()
+            if raw:
+                candidate = Path(raw)
+                if candidate.parent.is_dir():
+                    start = str(candidate.parent)
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open in sequence viewer",
+            start,
+            "JSON sequence (*.json);;All files (*.*)",
+        )
+        if not path_str:
+            return
+        path = Path(path_str).resolve()
+        try:
+            subprocess.Popen(
+                [sys.executable, "-m", "sequencer_gui.visualizer", str(path)],
+                close_fds=True,
+            )
+        except OSError as e:
+            QMessageBox.warning(self, "Sequence viewer", str(e))

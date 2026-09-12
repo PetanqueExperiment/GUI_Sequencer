@@ -216,7 +216,10 @@ class StaticParametersPanel(QWidget):
         self._detect_summary.setStyleSheet(_STYLE_IDLE)
 
         has_types = bool(iter_static_objects())
-        self._add_btn.setEnabled(has_types)
+        view_only = self._state.is_read_only
+        self._add_btn.setEnabled(has_types and not view_only)
+        self._add_btn.setVisible(not view_only)
+        self._detect_btn.setVisible(not view_only)
 
         if not has_types:
             hint = QLabel(
@@ -232,7 +235,11 @@ class StaticParametersPanel(QWidget):
             return
 
         if doc.static_rows < 1:
-            hint = QLabel("No static devices.\n\nUse Add to create one.")
+            hint = QLabel(
+                "No static devices."
+                if view_only
+                else "No static devices.\n\nUse Add to create one."
+            )
             hint.setWordWrap(True)
             hint.setAlignment(Qt.AlignTop)
             hint.setStyleSheet("color: #616161;")
@@ -241,7 +248,7 @@ class StaticParametersPanel(QWidget):
             self._detect_btn.setEnabled(False)
             return
 
-        self._detect_btn.setEnabled(True)
+        self._detect_btn.setEnabled(not view_only)
         for row in range(doc.static_rows):
             if row > 0:
                 sep = QFrame()
@@ -405,6 +412,10 @@ class _StaticRowWidgets(QWidget):
         self._remove_btn.setFixedWidth(28)
         self._remove_btn.setToolTip("Remove this static device")
         self._remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.row))
+        if state.is_read_only:
+            self._remove_btn.hide()
+            self._label_edit.setReadOnly(True)
+            self._combo.setEnabled(False)
         head.addWidget(self._remove_btn, 0)
         layout.addLayout(head)
 
@@ -469,6 +480,8 @@ class _StaticRowWidgets(QWidget):
                 return on_return
 
             ed.set_on_return(make_return(ed, spec))
+            if self._state.is_read_only:
+                ed.setReadOnly(True)
             row.addWidget(ed, 1)
             wrap = QWidget()
             wrap.setLayout(row)

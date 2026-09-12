@@ -74,6 +74,8 @@ class SequenceAppState(QObject):
         document: SequenceDocument | None = None,
         model: SequenceModel | None = None,
         sequence_name: str = "Untitled",
+        *,
+        read_only: bool = False,
     ) -> None:
         super().__init__()
         self._backend = backend if backend is not None else NoOpBackend()
@@ -85,6 +87,7 @@ class SequenceAppState(QObject):
             raise ValueError("document or model is required")
         self._active_tab = 0
         self._sequence_name = sequence_name
+        self._read_only = read_only
         self._run_sequence = False
         self._scan_running = False
         self._scan_label = ""
@@ -111,7 +114,14 @@ class SequenceAppState(QObject):
         return self._active_tab
 
     @property
+    def is_read_only(self) -> bool:
+        """True for the sequence visualizer (browse-only; no edits)."""
+        return self._read_only
+
+    @property
     def timeline_read_only(self) -> bool:
+        if self._read_only:
+            return True
         if self._active_tab != COMPLETE_TAB_INDEX:
             return False
         return not any(b.enabled for b in self._document.blocks)

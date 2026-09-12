@@ -373,6 +373,10 @@ class DeviceRowWidget:
         for row in self._analog_edits:
             for ed in row:
                 ed.setEnabled(not read_only)
+        # Document structure (labels / device type) is only locked in the visualizer.
+        view_only = self._state.is_read_only
+        self._edit.setReadOnly(view_only)
+        self._sw.setEnabled(not view_only)
 
     def _apply_block_column_hint(self, widget: QWidget, col: int) -> None:
         if self._column_block_accents is None or col >= len(self._column_block_accents):

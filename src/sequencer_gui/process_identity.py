@@ -44,7 +44,7 @@ PYCAM_LIVE_EXPERIMENT_NAME = "Running_without_scan"
 BURST_SHOTS_UNLIMITED = -1
 
 
-def set_windows_taskbar_app_id() -> None:
+def set_windows_taskbar_app_id(app_id: str | None = None) -> None:
     """
     Set the app id the shell uses to group the taskbar / Start menu. Call
     *before* creating :class:`PyQt5.QtWidgets.QApplication` on Windows.
@@ -56,6 +56,8 @@ def set_windows_taskbar_app_id() -> None:
     except ImportError:
         return
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WIN32_APP_USER_MODEL_ID)
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            app_id if app_id is not None else WIN32_APP_USER_MODEL_ID
+        )
     except (AttributeError, OSError):
         pass

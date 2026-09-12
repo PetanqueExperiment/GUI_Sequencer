@@ -20,6 +20,7 @@ dependencies = [
 # Or after install: `sequencer-gui` (console script, hyphen OK).
 [project.scripts]
 sequencer-gui = "sequencer_gui.main:main"
+sequencer-gui-view = "sequencer_gui.visualizer:main"
 
 [project.optional-dependencies]
 dev = []

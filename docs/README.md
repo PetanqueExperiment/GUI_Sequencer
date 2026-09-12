@@ -16,15 +16,20 @@ pip install -e .
 
 python -m sequencer_gui
 # or: sequencer-gui
+
+# Read-only viewer for saved .json sequences (no HERO / run / scan):
+python -m sequencer_gui.visualizer [path\to\sequence.json]
+# or: sequencer-gui-view
 ```
 
-On Windows, `Start_Sequencer_GUI.bat` launches the app.
+On Windows, `Start_Sequencer_GUI.bat` launches the editor; `Start_Sequence_Viewer.bat` launches the viewer.
 
 ## Source layout (high level)
 
 ```
 src/sequencer_gui/
   main.py              # Entry point, single instance, HERO backend wiring
+  visualizer.py        # Read-only sequence viewer entry point
   app/                 # SequenceAppState, backends
   domain/              # SequenceDocument, SequenceModel, merge logic
   software_objects/    # Device type catalog (dynamical + static)

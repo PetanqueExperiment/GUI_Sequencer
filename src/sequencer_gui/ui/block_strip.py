@@ -163,6 +163,8 @@ class BlockStripWidget(QGroupBox):
         self._btn_add = QPushButton("Add block")
         self._btn_add.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._btn_add.clicked.connect(self._on_add_block)
+        if state.is_read_only:
+            self._btn_add.hide()
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -199,64 +201,78 @@ class BlockStripWidget(QGroupBox):
             outer.setContentsMargins(8, 4, 8, 4)
             outer.setSpacing(4)
 
+            view_only = self._state.is_read_only
             row_name = QHBoxLayout()
             row_name.setSpacing(6)
 
-            handle = _DragHandle(i, self._canvas)
-            row_name.addWidget(handle)
+            if not view_only:
+                handle = _DragHandle(i, self._canvas)
+                row_name.addWidget(handle)
 
             btn_color = QPushButton()
             btn_color.setFixedSize(22, 22)
-            btn_color.setToolTip("Choose block color (right-click to reset)")
             btn_color.setStyleSheet(block_swatch_stylesheet(accent))
-            btn_color.setCursor(Qt.PointingHandCursor)
+            if view_only:
+                btn_color.setEnabled(False)
+                btn_color.setToolTip("Block color")
+            else:
+                btn_color.setToolTip("Choose block color (right-click to reset)")
+                btn_color.setCursor(Qt.PointingHandCursor)
 
-            def make_pick_color(ii: int, button: QPushButton, card: QFrame):
-                def on_clicked() -> None:
-                    current = QColor(
-                        resolve_block_accent_color(ii, self._state.document.blocks[ii].accent_color)
-                    )
-                    chosen = QColorDialog.getColor(current, card, "Block color")
-                    if chosen.isValid():
-                        self._state.set_block_accent_color(ii, chosen.name())
+                def make_pick_color(ii: int, button: QPushButton, card: QFrame):
+                    def on_clicked() -> None:
+                        current = QColor(
+                            resolve_block_accent_color(
+                                ii, self._state.document.blocks[ii].accent_color
+                            )
+                        )
+                        chosen = QColorDialog.getColor(current, card, "Block color")
+                        if chosen.isValid():
+                            self._state.set_block_accent_color(ii, chosen.name())
 
-                return on_clicked
+                    return on_clicked
 
-            def make_color_menu(ii: int):
-                def show_menu(pos) -> None:
-                    menu = QMenu()
-                    reset = menu.addAction("Reset to default color")
-                    picked = menu.exec_(btn_color.mapToGlobal(pos))
-                    if picked is reset:
-                        self._state.set_block_accent_color(ii, None)
+                def make_color_menu(ii: int):
+                    def show_menu(pos) -> None:
+                        menu = QMenu()
+                        reset = menu.addAction("Reset to default color")
+                        picked = menu.exec_(btn_color.mapToGlobal(pos))
+                        if picked is reset:
+                            self._state.set_block_accent_color(ii, None)
 
-                return show_menu
+                    return show_menu
 
-            btn_color.clicked.connect(make_pick_color(i, btn_color, frame))
-            btn_color.setContextMenuPolicy(Qt.CustomContextMenu)
-            btn_color.customContextMenuRequested.connect(make_color_menu(i))
+                btn_color.clicked.connect(make_pick_color(i, btn_color, frame))
+                btn_color.setContextMenuPolicy(Qt.CustomContextMenu)
+                btn_color.customContextMenuRequested.connect(make_color_menu(i))
 
             edit = QLineEdit(b.name)
             edit.setMinimumWidth(120)
+            edit.setReadOnly(view_only)
             idx = i
 
-            def make_finished(ii: int, e: QLineEdit):
-                def on_finished() -> None:
-                    self._state.set_block_name(ii, e.text())
+            if not view_only:
 
-                return on_finished
+                def make_finished(ii: int, e: QLineEdit):
+                    def on_finished() -> None:
+                        self._state.set_block_name(ii, e.text())
 
-            edit.editingFinished.connect(make_finished(idx, edit))
+                    return on_finished
+
+                edit.editingFinished.connect(make_finished(idx, edit))
             row_name.addWidget(edit)
             row_name.addStretch(1)
 
-            btn_remove = QPushButton("\u00d7")
-            btn_remove.setFixedSize(22, 22)
-            btn_remove.setFlat(True)
-            btn_remove.setToolTip("Remove block")
-            btn_remove.setEnabled(len(doc.blocks) > 1)
-            btn_remove.clicked.connect(lambda checked=False, ii=idx: self._state.remove_block(ii))
-            row_name.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
+            if not view_only:
+                btn_remove = QPushButton("\u00d7")
+                btn_remove.setFixedSize(22, 22)
+                btn_remove.setFlat(True)
+                btn_remove.setToolTip("Remove block")
+                btn_remove.setEnabled(len(doc.blocks) > 1)
+                btn_remove.clicked.connect(
+                    lambda checked=False, ii=idx: self._state.remove_block(ii)
+                )
+                row_name.addWidget(btn_remove, 0, Qt.AlignRight | Qt.AlignVCenter)
             outer.addLayout(row_name)
 
             row_actions = QHBoxLayout()
@@ -265,15 +281,18 @@ class BlockStripWidget(QGroupBox):
             on_btn = QPushButton("On")
             on_btn.setCheckable(True)
             on_btn.setMinimumWidth(32)
+            on_btn.setEnabled(not view_only)
 
-            def make_toggled(ii: int, btn: QPushButton):
-                def on_toggled(checked: bool) -> None:
-                    self._state.set_block_enabled(ii, checked)
-                    btn.setText("On" if checked else "Off")
+            if not view_only:
 
-                return on_toggled
+                def make_toggled(ii: int, btn: QPushButton):
+                    def on_toggled(checked: bool) -> None:
+                        self._state.set_block_enabled(ii, checked)
+                        btn.setText("On" if checked else "Off")
 
-            on_btn.toggled.connect(make_toggled(idx, on_btn))
+                    return on_toggled
+
+                on_btn.toggled.connect(make_toggled(idx, on_btn))
             on_btn.blockSignals(True)
             on_btn.setChecked(b.enabled)
             on_btn.blockSignals(False)
@@ -286,18 +305,21 @@ class BlockStripWidget(QGroupBox):
             steps_edit.setMinimumWidth(32)
             steps_edit.setMaximumWidth(32)
             steps_edit.setToolTip("Number of time steps in this block")
+            steps_edit.setReadOnly(view_only)
 
-            def make_steps_finished(ii: int, e: QLineEdit):
-                def on_finished() -> None:
-                    text = e.text().strip()
-                    if not text:
-                        e.setText(str(self._state.document.blocks[ii].cols))
-                        return
-                    self._state.set_block_cols(ii, int(text))
+            if not view_only:
 
-                return on_finished
+                def make_steps_finished(ii: int, e: QLineEdit):
+                    def on_finished() -> None:
+                        text = e.text().strip()
+                        if not text:
+                            e.setText(str(self._state.document.blocks[ii].cols))
+                            return
+                        self._state.set_block_cols(ii, int(text))
 
-            steps_edit.editingFinished.connect(make_steps_finished(idx, steps_edit))
+                    return on_finished
+
+                steps_edit.editingFinished.connect(make_steps_finished(idx, steps_edit))
             row_actions.addWidget(steps_edit)
             row_actions.addStretch(1)
             row_actions.addWidget(btn_color, 0, Qt.AlignRight | Qt.AlignVCenter)
