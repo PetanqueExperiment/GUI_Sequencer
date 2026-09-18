@@ -384,6 +384,17 @@ def live_sequence_file_dict(name: str, document: SequenceDocument) -> dict[str, 
     }
 
 
+def sequence_display_name(raw: str) -> str:
+    """``name`` field for a sequence file: file stem when ``raw`` is a path, else the text itself."""
+    text = raw.strip()
+    if not text:
+        return "Untitled"
+    p = Path(text)
+    if p.suffix.lower() == ".json":
+        return p.stem or "Untitled"
+    return text
+
+
 def save_sequence(path: Path | str, name: str, document: SequenceDocument) -> None:
     p = Path(path)
     p.write_text(

@@ -19,12 +19,17 @@ from PyQt5.QtWidgets import (
 
 from sequencer_gui.app.state import ScanParameter, SequenceAppState
 from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME
-from sequencer_gui.pycam_repository import ScanLabelAvailability, classify_scan_label
+from sequencer_gui.pycam_repository import (
+    ScanLabelAvailability,
+    classify_scan_label,
+    save_scan_sequence_snapshot,
+)
 from sequencer_gui.pycam_experiment import (
     prepare_and_start_experiment,
     shots_seen,
     stop_experiment_if_running,
 )
+from sequencer_gui.sequence_io import sequence_display_name
 from sequencer_gui.scan_plan import (
     STATIC_TIMESTEP_LABEL,
     anticipated_scan_duration_s,
@@ -273,10 +278,31 @@ class ScanPanel(QGroupBox):
             )
             return
 
+        # Snapshot before the first scan point is applied: matrix as configured, not mid-scan.
+        snapshot_error = self._save_sequence_with_scan_data(name)
+
         self._state.prepare_scan_matrix_restore()
         self._state.set_scan_running(True)
         self._begin_scan_step(0)
         self._pycam_poll.start(500)
+
+        if snapshot_error is not None:
+            QMessageBox.warning(self, "Start scan", snapshot_error)
+
+    def _save_sequence_with_scan_data(self, experiment_name: str) -> str | None:
+        """Write the sequence JSON into PyCam's data folder; error message on failure."""
+        try:
+            save_scan_sequence_snapshot(
+                experiment_name,
+                sequence_display_name(self._state.sequence_name),
+                self._state.document,
+            )
+        except (OSError, ValueError) as e:
+            return (
+                "The scan is running, but the sequence JSON could not be saved "
+                f"with the PyCam data:\n{e}"
+            )
+        return None
 
     def _pycam_shots_done_for_step(self, shots_seen_count: int, step_index: int) -> bool:
         return shots_seen_count >= (step_index + 1) * self._scan_repetitions

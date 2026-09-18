@@ -260,6 +260,8 @@ sequenceDiagram
 
 Scan label availability (red/blue/green) comes from `pycam_repository.classify_scan_label` (today’s data folders).
 
+On scan start, `pycam_repository.save_scan_sequence_snapshot` writes the sequence JSON (same v8 format as the Save button) into the PyCam data folder of the scan: `{PYCAM_DATA_DIRECTORY}/{Y}/{m}/{d}/{scan label}/sequence.json`. Written after PyCam accepted the experiment name and before the first scan point is applied, so the snapshot holds the configured matrix. A reused label keeps the earlier file and writes `sequence_{HHMMSS}.json`. Failure only warns; the scan continues.
+
 ### 5.5 ArtiQ master panel
 
 ```mermaid
@@ -374,7 +376,7 @@ Constants in `process_identity.py`:
 | `atomiq_status.py` | Scheduler snapshot |
 | `atomiq_actions.py` | Submit / interrupt experiments |
 | `pycam_experiment.py` | Live + scan PyCam calls |
-| `pycam_repository.py` | Scan label folder classification |
+| `pycam_repository.py` | Scan label folder classification, sequence snapshot next to PyCam data |
 | `ui/channel_matrix.py` | Grid widget |
 | `ui/device_row.py` | Per-row editors |
 | `ui/block_strip.py` | Block management UI |

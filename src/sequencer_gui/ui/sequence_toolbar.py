@@ -26,6 +26,7 @@ from sequencer_gui.sequence_io import (
     SequenceFileError,
     load_sequence,
     save_sequence,
+    sequence_display_name,
     validate_document_for_ui,
 )
 
@@ -166,16 +167,6 @@ class SequenceToolbar(QGroupBox):
     def _on_name_edited(self) -> None:
         self._state.set_sequence_name(self._name.text())
 
-    @staticmethod
-    def _name_for_json_file(raw: str) -> str:
-        text = raw.strip()
-        if not text:
-            return "Untitled"
-        p = Path(text)
-        if p.suffix.lower() == ".json":
-            return p.stem or "Untitled"
-        return text
-
     def _save_dialog_initial_path(self, default_stem: str) -> str:
         raw = self._name.text().strip()
         if raw:
@@ -189,7 +180,7 @@ class SequenceToolbar(QGroupBox):
         return str(Path.home() / f"{safe}.json")
 
     def _on_save(self) -> None:
-        name = self._name_for_json_file(self._name.text())
+        name = sequence_display_name(self._name.text())
         path_str, _ = QFileDialog.getSaveFileName(
             self,
             "Save sequence",
