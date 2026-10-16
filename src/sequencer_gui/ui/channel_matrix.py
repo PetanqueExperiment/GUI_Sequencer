@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import QEvent, Qt, QTimer
-from PyQt5.QtGui import QWheelEvent
+from PyQt5.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt5.QtGui import QCursor, QWheelEvent
 from PyQt5.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QScrollArea,
     QScrollBar,
     QSizePolicy,
@@ -48,6 +50,13 @@ _INDEX_ROW_MIN_HEIGHT_PX = 20
 _BLOCK_BAND_ROW_MIN_HEIGHT_PX = 20
 _LABEL_ROW_MIN_HEIGHT_PX = 24
 _TIME_ROW_MIN_HEIGHT_PX = 28
+_COLUMN_HEADER_BUTTON_PX = 16
+# Timestep labels are still loaded/saved and used by scans; only the editing row is hidden.
+_SHOW_TIMESTEP_LABEL_ROW = False
+_COLUMN_DRAGGING_STYLE = "background-color: #b0bec5; border-radius: 3px;"
+_COLUMN_DRAG_AUTOSCROLL_MS = 30
+_COLUMN_DRAG_AUTOSCROLL_EDGE_PX = 32
+_COLUMN_DRAG_AUTOSCROLL_STEP_PX = 14
 
 _DELAY_MIN_US = 0.0
 _DELAY_MAX_US = 1e9
@@ -153,22 +162,103 @@ class _DelayUsLineEdit(CommitFloatLineEdit):
         return result
 
 
-def _make_timestep_index_label(
-    col: int,
-    *,
-    accent: str | None = None,
-    block_separator: bool = False,
-) -> QLabel:
-    lab = QLabel(str(col))
-    lab.setAlignment(Qt.AlignCenter)
-    lab.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-    lab.setFixedHeight(_INDEX_ROW_MIN_HEIGHT_PX)
-    lab.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-    style = "color: #78909c; font-size: 11px;"
-    if accent is not None:
-        style += " " + block_column_tint_stylesheet(accent, block_separator=block_separator)
-    lab.setStyleSheet(style)
-    return lab
+class _ColumnDragHandle(QLabel):
+    """Starts a live column reorder (☰): cells move in the matrix as you drag."""
+
+    def __init__(self, col: int, matrix: "ChannelMatrix", parent: QWidget | None = None) -> None:
+        super().__init__("☰", parent)
+        self._col = col
+        self._matrix = matrix
+        self._press_pos = None
+        self.setCursor(Qt.OpenHandCursor)
+        self.setToolTip("Drag to reorder columns")
+        self.setFixedWidth(_COLUMN_HEADER_BUTTON_PX)
+        self.setAlignment(Qt.AlignCenter)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._press_pos is None or not (event.buttons() & Qt.LeftButton):
+            return super().mouseMoveEvent(event)
+        if (event.pos() - self._press_pos).manhattanLength() < QApplication.startDragDistance():
+            return super().mouseMoveEvent(event)
+        self._press_pos = None
+        self._matrix.begin_column_drag(self._col)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._press_pos = None
+        super().mouseReleaseEvent(event)
+
+
+class _ColumnHeader(QWidget):
+    """Timestep index cell: drag handle, column number, duplicate button."""
+
+    def __init__(
+        self,
+        col: int,
+        display_index: int,
+        matrix: "ChannelMatrix",
+        *,
+        editable: bool,
+        accent: str | None = None,
+        block_separator: bool = False,
+    ) -> None:
+        super().__init__()
+        self.setObjectName("columnHeader")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+        self.setFixedHeight(_INDEX_ROW_MIN_HEIGHT_PX)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self._base_style = ""
+        if accent is not None:
+            self._base_style = block_column_tint_stylesheet(accent, block_separator=block_separator)
+        self.setStyleSheet(f"#columnHeader {{ {self._base_style} }}")
+
+        self._col = col
+        self._matrix = matrix
+        self._editable = editable
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._handle: _ColumnDragHandle | None = None
+        if editable:
+            self._handle = _ColumnDragHandle(col, matrix)
+            self._handle.setStyleSheet("color: #78909c; font-size: 11px;")
+            lay.addWidget(self._handle)
+        lab = QLabel(str(display_index))
+        lab.setAlignment(Qt.AlignCenter)
+        lab.setStyleSheet("color: #78909c; font-size: 11px;")
+        lay.addWidget(lab, 1)
+        # Balances the handle so the number stays centered.
+        lay.addSpacing(_COLUMN_HEADER_BUTTON_PX if editable else 0)
+
+        if editable:
+            self.setToolTip("Drag ☰ to reorder · right-click for column actions")
+            self.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.customContextMenuRequested.connect(self._show_menu)
+
+    def set_editable(self, editable: bool) -> None:
+        self._editable = editable
+        if self._handle is not None:
+            self._handle.setVisible(editable)
+
+    def _show_menu(self, pos) -> None:
+        if not self._editable:
+            return
+        menu = QMenu(self)
+        menu.addAction("Duplicate column", lambda: self._matrix.duplicate_column(self._col))
+        delete = menu.addAction("Delete column", lambda: self._matrix.delete_column(self._col))
+        delete.setEnabled(self._matrix.can_delete_column(self._col))
+        menu.exec_(self.mapToGlobal(pos))
+
+    def set_dragging(self, dragging: bool) -> None:
+        extra = _COLUMN_DRAGGING_STYLE if dragging else ""
+        self.setStyleSheet(f"#columnHeader {{ {self._base_style} {extra} }}")
 
 
 def _make_block_band_label(name: str, accent: str, ncol: int) -> QLabel:
@@ -323,6 +413,19 @@ class ChannelMatrix(QGroupBox):
         self._time_steps: QWidget | None = None
         self._steps_host: QWidget | None = None
         self._steps_content_width_px = 0
+        self._col_headers: list[_ColumnHeader] = []
+        self._ts_grid: QGridLayout | None = None
+        self._ts_column_rows: tuple[int, ...] = ()
+
+        self._col_drag_active = False
+        self._col_drag_perm: list[int] = []
+        self._col_drag_slot = 0
+        self._col_drag_origin = 0
+        self._col_drag_range = (0, 0)
+        self._col_drag_cells: list[tuple[QGridLayout, int, list[QWidget]]] = []
+        self._col_drag_timer = QTimer(self)
+        self._col_drag_timer.setInterval(_COLUMN_DRAG_AUTOSCROLL_MS)
+        self._col_drag_timer.timeout.connect(self._on_column_drag_tick)
 
         self._outer = QVBoxLayout(self)
         self._outer.setSpacing(_PAIR_V_SPACING_PX)
@@ -347,6 +450,143 @@ class ChannelMatrix(QGroupBox):
             ed.setEnabled(not ro)
         for ed in self._delay_edits:
             ed.setEnabled(not ro)
+        for header in self._col_headers:
+            header.set_editable(not ro)
+
+    def duplicate_column(self, col: int) -> None:
+        if self._col_drag_active or self._state.timeline_read_only:
+            return
+        self._keeping_horizontal_scroll(lambda: self._state.duplicate_column(col))
+
+    def can_delete_column(self, col: int) -> bool:
+        return not self._col_drag_active and self._state.can_delete_column(col)
+
+    def delete_column(self, col: int) -> None:
+        if not self.can_delete_column(col):
+            return
+        self._keeping_horizontal_scroll(lambda: self._state.delete_column(col))
+
+    def _keeping_horizontal_scroll(self, edit) -> None:
+        """Run an edit that rebuilds the matrix without jumping back to the first column."""
+        scroll_x = (
+            self._matrix_panel.horizontalScrollBar().value() if self._matrix_panel is not None else 0
+        )
+        edit()
+        QTimer.singleShot(0, lambda: self._restore_horizontal_scroll(scroll_x))
+
+    def begin_column_drag(self, col: int) -> None:
+        """Live-reorder a column; the sequence is only updated on release (Esc cancels)."""
+        if self._col_drag_active or self._state.timeline_read_only:
+            return
+        if self._time_steps is None or self._ts_grid is None or not (0 <= col < len(self._col_headers)):
+            return
+        lo, hi = 0, len(self._col_headers) - 1
+        for span in self._timeline_block_spans(self._state.model):
+            if span.merged_start_col <= col < span.merged_start_col + span.ncol:
+                lo, hi = span.merged_start_col, span.merged_start_col + span.ncol - 1
+                break
+        if lo == hi:
+            return
+        timeline_widgets = [self._col_headers, self._delay_edits]
+        if _SHOW_TIMESTEP_LABEL_ROW:
+            timeline_widgets.insert(1, self._col_label_edits)
+        cells = [
+            (self._ts_grid, grid_row, list(widgets))
+            for grid_row, widgets in zip(self._ts_column_rows, timeline_widgets)
+        ]
+        for dr in self._device_rows:
+            cells.extend(dr.column_cell_rows())
+        self._col_drag_cells = cells
+        self._col_drag_range = (lo, hi)
+        self._col_drag_perm = list(range(len(self._col_headers)))
+        self._col_drag_slot = col
+        self._col_drag_origin = col
+        self._col_drag_active = True
+        self._col_headers[col].set_dragging(True)
+        self._time_steps.installEventFilter(self)
+        self._time_steps.grabMouse(QCursor(Qt.ClosedHandCursor))
+        self._time_steps.grabKeyboard()
+        self._col_drag_timer.start()
+        self._update_column_drag_target()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        if not self._col_drag_active or obj is not self._time_steps:
+            return super().eventFilter(obj, event)
+        et = event.type()
+        if et == QEvent.MouseMove:
+            self._update_column_drag_target()
+            return True
+        if et == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            self._end_column_drag(commit=True)
+            return True
+        if et == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self._end_column_drag(commit=False)
+            return True
+        if et in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick, QEvent.KeyPress):
+            return True
+        return super().eventFilter(obj, event)
+
+    def _column_index_at_x(self, x: int) -> int:
+        pitch = STEP_COLUMN_WIDTH_PX + GRID_H_SPACING_PX
+        n = len(self._col_headers)
+        for i in range(n):
+            if x < i * pitch + STEP_COLUMN_WIDTH_PX / 2:
+                return i
+        return n - 1
+
+    def _update_column_drag_target(self) -> None:
+        if not self._col_drag_active or self._time_steps is None:
+            return
+        x = self._time_steps.mapFromGlobal(QCursor.pos()).x()
+        lo, hi = self._col_drag_range
+        target = max(lo, min(hi, self._column_index_at_x(x)))
+        if target == self._col_drag_slot:
+            return
+        self._col_drag_perm.insert(target, self._col_drag_perm.pop(self._col_drag_slot))
+        self._col_drag_slot = target
+        self._place_drag_columns(self._col_drag_perm)
+
+    def _place_drag_columns(self, perm: list[int]) -> None:
+        lo, hi = self._col_drag_range
+        for grid, grid_row, widgets in self._col_drag_cells:
+            for pos in range(lo, hi + 1):
+                grid.removeWidget(widgets[pos])
+            for pos in range(lo, hi + 1):
+                grid.addWidget(widgets[perm[pos]], grid_row, pos)
+
+    def _on_column_drag_tick(self) -> None:
+        if not self._col_drag_active or self._matrix_panel is None or self._timeline_panel is None:
+            return
+        vp = self._timeline_panel.viewport()
+        x = vp.mapFromGlobal(QCursor.pos()).x()
+        bar = self._matrix_panel.horizontalScrollBar()
+        if x < _COLUMN_DRAG_AUTOSCROLL_EDGE_PX:
+            bar.setValue(bar.value() - _COLUMN_DRAG_AUTOSCROLL_STEP_PX)
+        elif x > vp.width() - _COLUMN_DRAG_AUTOSCROLL_EDGE_PX:
+            bar.setValue(bar.value() + _COLUMN_DRAG_AUTOSCROLL_STEP_PX)
+        else:
+            return
+        self._update_column_drag_target()
+
+    def _end_column_drag(self, *, commit: bool) -> None:
+        if not self._col_drag_active:
+            return
+        self._col_drag_active = False
+        self._col_drag_timer.stop()
+        if self._time_steps is not None:
+            self._time_steps.releaseMouse()
+            self._time_steps.releaseKeyboard()
+            self._time_steps.removeEventFilter(self)
+        perm = self._col_drag_perm
+        # Widgets go back to their original slots so their column bindings stay valid;
+        # the committed reorder then refreshes values in place.
+        self._place_drag_columns(list(range(len(perm))))
+        if 0 <= self._col_drag_origin < len(self._col_headers):
+            self._col_headers[self._col_drag_origin].set_dragging(False)
+        self._col_drag_cells = []
+        self._col_drag_perm = []
+        if commit and perm != list(range(len(perm))):
+            self._state.apply_column_permutation(perm)
 
     def _on_delay_return_pressed(self, col: int) -> None:
         line = self._delay_edits[col]
@@ -370,9 +610,13 @@ class ChannelMatrix(QGroupBox):
         line.set_committed_display(_format_delay_us(committed))
 
     def _clear_content(self) -> None:
+        self._end_column_drag(commit=False)
         self._device_rows.clear()
         self._col_label_edits.clear()
         self._delay_edits.clear()
+        self._col_headers.clear()
+        self._ts_grid = None
+        self._ts_column_rows = ()
         self._corner_block = None
         self._labels_panel = None
         self._timeline_panel = None
@@ -513,6 +757,10 @@ class ChannelMatrix(QGroupBox):
         if self._timeline_panel is not None:
             self._timeline_panel.set_scroll_x(0)
 
+    def _restore_horizontal_scroll(self, px: int) -> None:
+        if self._matrix_panel is not None:
+            self._matrix_panel.horizontalScrollBar().setValue(px)
+
     def _apply_steps_width(self, model: SequenceModel) -> None:
         steps_w = max(
             timeline_steps_width_px(model.cols),
@@ -583,8 +831,13 @@ class ChannelMatrix(QGroupBox):
         show_block_band = bool(spans)
         index_row = 1 if show_block_band else 0
         label_row = index_row + 1
-        delay_row = label_row + 1
+        delay_row = label_row + 1 if _SHOW_TIMESTEP_LABEL_ROW else index_row + 1
         gap_row = delay_row + 1
+        self._ts_grid = ts_grid
+        if _SHOW_TIMESTEP_LABEL_ROW:
+            self._ts_column_rows = (index_row, label_row, delay_row)
+        else:
+            self._ts_column_rows = (index_row, delay_row)
 
         if show_block_band:
             for span in spans:
@@ -606,27 +859,29 @@ class ChannelMatrix(QGroupBox):
             if block_indices is not None and accent is not None:
                 bi = block_indices[c]
                 block_separator = is_block_column_start(c, block_indices) and bi > 0
-            ts_grid.addWidget(
-                _make_timestep_index_label(
-                    col_index_offset + c,
-                    accent=accent,
-                    block_separator=block_separator,
-                ),
-                index_row,
+            header = _ColumnHeader(
                 c,
+                col_index_offset + c,
+                self,
+                editable=not self._state.is_read_only,
+                accent=accent,
+                block_separator=block_separator,
             )
+            self._col_headers.append(header)
+            ts_grid.addWidget(header, index_row, c)
 
-            label_ed = QLineEdit(model.col_label(c))
-            label_ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
-            label_ed.setPlaceholderText("...")
-            label_ed.editingFinished.connect(
-                lambda idx=c, e=label_ed: self._state.set_col_label(idx, e.text())
-            )
-            self._col_label_edits.append(label_ed)
-            label_ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            if accent is not None:
-                _apply_block_column_hint(label_ed, accent, block_separator=block_separator)
-            ts_grid.addWidget(label_ed, label_row, c)
+            if _SHOW_TIMESTEP_LABEL_ROW:
+                label_ed = QLineEdit(model.col_label(c))
+                label_ed.setFixedWidth(STEP_COLUMN_WIDTH_PX)
+                label_ed.setPlaceholderText("...")
+                label_ed.editingFinished.connect(
+                    lambda idx=c, e=label_ed: self._state.set_col_label(idx, e.text())
+                )
+                self._col_label_edits.append(label_ed)
+                label_ed.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                if accent is not None:
+                    _apply_block_column_hint(label_ed, accent, block_separator=block_separator)
+                ts_grid.addWidget(label_ed, label_row, c)
 
             delay_us = model.delay_us(c)
             ed = _DelayUsLineEdit(_DELAY_MIN_US, _DELAY_MAX_US, _DELAY_DECIMALS)
@@ -657,13 +912,15 @@ class ChannelMatrix(QGroupBox):
         band_extra = (
             (_BLOCK_BAND_ROW_MIN_HEIGHT_PX + _PAIR_V_SPACING_PX) if show_block_band else 0
         )
+        label_extra = (
+            (_LABEL_ROW_MIN_HEIGHT_PX + _PAIR_V_SPACING_PX) if _SHOW_TIMESTEP_LABEL_ROW else 0
+        )
         time_h = max(
             self._time_steps.sizeHint().height(),
             band_extra
             + _INDEX_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
-            + _LABEL_ROW_MIN_HEIGHT_PX
-            + _PAIR_V_SPACING_PX
+            + label_extra
             + _TIME_ROW_MIN_HEIGHT_PX
             + _PAIR_V_SPACING_PX
             + _TIME_AFTER_GAP_PX,
@@ -703,12 +960,13 @@ class ChannelMatrix(QGroupBox):
         corner_index.setStyleSheet("color: #78909c; font-size: 11px;")
         corner_index.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         corner_lay.addWidget(corner_index)
-        corner_timestep = QLabel("Timestep label")
-        corner_timestep.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        corner_timestep.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
-        corner_timestep.setFixedHeight(_LABEL_ROW_MIN_HEIGHT_PX)
-        corner_timestep.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        corner_lay.addWidget(corner_timestep)
+        if _SHOW_TIMESTEP_LABEL_ROW:
+            corner_timestep = QLabel("Timestep label")
+            corner_timestep.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            corner_timestep.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
+            corner_timestep.setFixedHeight(_LABEL_ROW_MIN_HEIGHT_PX)
+            corner_timestep.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            corner_lay.addWidget(corner_timestep)
         corner = QLabel("Time (µs)")
         corner.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         corner.setFixedWidth(LABEL_COL_MIN_WIDTH_PX)
@@ -825,7 +1083,7 @@ class ChannelMatrix(QGroupBox):
             model.rows != self._built_rows
             or model.cols != self._built_cols
             or len(self._delay_edits) != model.cols
-            or len(self._col_label_edits) != model.cols
+            or (_SHOW_TIMESTEP_LABEL_ROW and len(self._col_label_edits) != model.cols)
             or self._block_band_signature() != self._built_block_band_sig
         ):
             self._build_content(model)

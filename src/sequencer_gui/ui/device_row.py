@@ -335,6 +335,15 @@ class DeviceRowWidget:
     def set_steps_width(self, steps_w: int) -> None:
         self._steps_panel.setFixedWidth(steps_w)
 
+    def column_cell_rows(self) -> list[tuple[QGridLayout, int, list[QWidget]]]:
+        """Per steps-grid row: (grid, grid row, one widget per timeline column)."""
+        rows: list[tuple[QGridLayout, int, list[QWidget]]] = []
+        if self._buttons:
+            rows.append((self._steps_grid, 0, list(self._buttons)))
+        for pi, edits in enumerate(self._analog_edits):
+            rows.append((self._steps_grid, 1 + pi, list(edits)))
+        return rows
+
     def _sync_paired_grid_rows(self) -> None:
         rows = max(self._label_grid.rowCount(), self._steps_grid.rowCount())
         for r in range(rows):

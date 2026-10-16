@@ -11,11 +11,13 @@ from sequencer_gui.app.backend import NoOpBackend, SequenceBackendProtocol
 from sequencer_gui.process_identity import BURST_SHOTS_UNLIMITED
 from sequencer_gui.domain.analog_stored import AnalogStored
 from sequencer_gui.domain.document import (
+    MergedBlockSpan,
     SequenceBlock,
     SequenceDocument,
     block_to_sequence_model,
     document_from_single_model,
     merge_blocks,
+    merged_enabled_block_spans,
     merged_enabled_timeline_col_to_block,
 )
 from sequencer_gui.domain.model import DEFAULT_DELAY_US, SequenceModel
@@ -556,6 +558,67 @@ class SequenceAppState(QObject):
         if b.cols == cols:
             return
         self._commit_document(self._document.with_block(block_index, b.with_cols(cols)))
+        self.channels_changed.emit()
+        self.delays_changed.emit()
+        self.analog_changed.emit()
+
+    def duplicate_column(self, col: int) -> None:
+        """Insert a copy of a timeline column (current tab) right after it."""
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
+            return
+        bi, local_col = resolved
+        block = self._document.blocks[bi]
+        self._commit_document(self._document.with_block(bi, block.with_duplicated_col(local_col)))
+        self.channels_changed.emit()
+        self.delays_changed.emit()
+        self.analog_changed.emit()
+
+    def can_delete_column(self, col: int) -> bool:
+        """False when the column's block has a single column left (or the column does not map)."""
+        if self.timeline_read_only:
+            return False
+        resolved = self._timeline_col_to_block(col)
+        if resolved is None:
+            return False
+        return self._document.blocks[resolved[0]].cols > 1
+
+    def delete_column(self, col: int) -> None:
+        """Remove a timeline column (current tab); no-op on a block's last column."""
+        if not self.can_delete_column(col):
+            return
+        bi, local_col = self._timeline_col_to_block(col)  # type: ignore[misc]
+        block = self._document.blocks[bi]
+        self._commit_document(self._document.with_block(bi, block.with_removed_col(local_col)))
+        self.channels_changed.emit()
+        self.delays_changed.emit()
+        self.analog_changed.emit()
+
+    def apply_column_permutation(self, permutation: list[int]) -> None:
+        """Reorder timeline columns of the current tab. permutation[i] is the original column now at i.
+
+        On the Complete tab, columns may only be reordered within their own block.
+        """
+        if self._active_tab == COMPLETE_TAB_INDEX:
+            spans = merged_enabled_block_spans(self._document)
+        else:
+            b = self._document.blocks[self._active_tab]
+            spans = (MergedBlockSpan(0, b.cols, self._active_tab, b.name),)
+        total = sum(s.ncol for s in spans)
+        if len(permutation) != total or set(permutation) != set(range(total)):
+            raise ValueError("invalid column permutation")
+        doc = self._document
+        for s in spans:
+            start = s.merged_start_col
+            local = [p - start for p in permutation[start : start + s.ncol]]
+            if set(local) != set(range(s.ncol)):
+                raise ValueError("columns cannot be moved between blocks")
+            if local != list(range(s.ncol)):
+                block = doc.blocks[s.block_index]
+                doc = doc.with_block(s.block_index, block.with_permuted_cols(local))
+        if doc is self._document:
+            return
+        self._commit_document(doc)
         self.channels_changed.emit()
         self.delays_changed.emit()
         self.analog_changed.emit()

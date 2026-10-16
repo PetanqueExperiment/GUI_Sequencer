@@ -300,7 +300,7 @@ Bypass single instance: `SEQUENCER_ALLOW_MULTIPLE=1`. Optional HERO preload: `SE
 1. **Top row:** `SequenceToolbar` | `ArtiqPanel` | `ScanPanel` (stretch)
 2. **Block strip:** `BlockStripWidget` — enable, reorder, add/remove blocks
 3. **Tabs:** Complete + one tab per block
-4. **Matrix row:** `ChannelMatrix` (stretch) | `StaticParametersPanel` (collapsible)
+4. **Matrix row:** `ChannelMatrix` (stretch) | `StaticParametersPanel` (collapsible) — column header ☰ drags a column (live preview, committed on drop, Esc cancels; within one block on Complete); right-click the header to duplicate (copy inserted to the right) or delete the column (a block keeps at least one). The timestep label row is currently hidden (`_SHOW_TIMESTEP_LABEL_ROW`)
 
 On close: commit row/column labels, save row labels and window geometry to settings.
 

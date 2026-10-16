@@ -111,6 +111,70 @@ class SequenceBlock:
         a[(row, param_id, col)] = normalize_analog_stored(value)
         return self._copy(analog=a)
 
+    def with_permuted_cols(self, permutation: Tuple[int, ...] | list[int]) -> SequenceBlock:
+        """Reorder columns. ``permutation[i]`` is the original column now at position ``i``."""
+        n = self.cols
+        if len(permutation) != n or set(permutation) != set(range(n)):
+            raise ValueError("invalid column permutation")
+        new_of_old = {old: new for new, old in enumerate(permutation)}
+        return self._copy(
+            channels={(r, new_of_old[c]): v for (r, c), v in self.channels.items() if c < n},
+            delays_us={new_of_old[c]: v for c, v in self.delays_us.items() if c < n},
+            analog={
+                (r, pid, new_of_old[c]): v for (r, pid, c), v in self.analog.items() if c < n
+            },
+            col_labels=tuple(self.col_labels[old] for old in permutation),
+        )
+
+    def with_duplicated_col(self, col: int) -> SequenceBlock:
+        """Insert a copy of ``col`` right after it (label left empty to keep labels unique)."""
+        if not (0 <= col < self.cols):
+            raise IndexError("column index out of range")
+
+        def shift(c: int) -> int:
+            return c + 1 if c > col else c
+
+        channels = {(r, shift(c)): v for (r, c), v in self.channels.items()}
+        channels.update({(r, col + 1): v for (r, c), v in self.channels.items() if c == col})
+        delays_us = {shift(c): v for c, v in self.delays_us.items()}
+        if col in self.delays_us:
+            delays_us[col + 1] = self.delays_us[col]
+        analog = {(r, pid, shift(c)): v for (r, pid, c), v in self.analog.items()}
+        analog.update(
+            {(r, pid, col + 1): v for (r, pid, c), v in self.analog.items() if c == col}
+        )
+        labels = list(self.col_labels)
+        labels.insert(col + 1, "")
+        return self._copy(
+            cols=self.cols + 1,
+            channels=channels,
+            delays_us=delays_us,
+            analog=analog,
+            col_labels=tuple(labels),
+        )
+
+    def with_removed_col(self, col: int) -> SequenceBlock:
+        """Remove one column; later columns shift left. A block keeps at least one column."""
+        if not (0 <= col < self.cols):
+            raise IndexError("column index out of range")
+        if self.cols <= 1:
+            raise ValueError("block cols must be positive")
+
+        def shift(c: int) -> int:
+            return c - 1 if c > col else c
+
+        labels = list(self.col_labels)
+        labels.pop(col)
+        return self._copy(
+            cols=self.cols - 1,
+            channels={(r, shift(c)): v for (r, c), v in self.channels.items() if c != col},
+            delays_us={shift(c): v for c, v in self.delays_us.items() if c != col},
+            analog={
+                (r, pid, shift(c)): v for (r, pid, c), v in self.analog.items() if c != col
+            },
+            col_labels=tuple(labels),
+        )
+
     def with_timeline_from_model(self, model: SequenceModel) -> SequenceBlock:
         """Replace timeline fields from a full model (rows/software/labels ignored)."""
         return self._copy(
