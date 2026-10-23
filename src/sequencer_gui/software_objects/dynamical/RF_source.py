@@ -11,7 +11,7 @@ RF_SOURCE_ID = "rf_source"
 @dataclass(frozen=True)
 class RfSourceObject:
     id: str = RF_SOURCE_ID
-    display_name: str = "RF source"
+    display_name: str = "RF Source"
 
     @property
     def has_on_off(self) -> bool:
@@ -30,10 +30,10 @@ class RfSourceObject:
             ),
             AnalogParameterSpec(
                 param_id="frequency",
-                label="Detuning (kHz)",
+                label="Frequency (MHz)",
                 default=HOLD_SIGNAL,
-                minimum=-9998.0,
-                maximum=10000.0,
-                decimals=1,
+                minimum=1.0,
+                maximum=400.0,
+                decimals=4,
             ),
         )
