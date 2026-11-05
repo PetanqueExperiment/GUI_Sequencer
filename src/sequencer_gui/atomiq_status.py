@@ -100,7 +100,12 @@ def connect_experimentdb_hero(hero_name: str = ATOMIQ_EXPERIMENTDB_HERO_NAME) ->
 
 def connect_artiq_heroes() -> tuple[object, object]:
     """Connect scheduler and experiment-database HEROs (slow discovery; reuse stubs)."""
-    return connect_scheduler_hero(), connect_experimentdb_hero()
+    scheduler = connect_scheduler_hero()
+    try:
+        return scheduler, connect_experimentdb_hero()
+    except Exception:
+        release_scheduler_hero(scheduler)
+        raise
 
 
 def release_scheduler_hero(scheduler: object | None) -> None:
@@ -118,7 +123,11 @@ def release_remote_hero(hero: object | None) -> None:
         return
     destroy = getattr(hero, "_destroy_hero", None)
     if callable(destroy):
-        destroy()
+        try:
+            destroy()
+        except Exception:
+            # The link may already be dead; the stub is being discarded either way.
+            pass
 
 
 def fetch_scheduler_snapshot(

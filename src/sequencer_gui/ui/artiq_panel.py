@@ -132,6 +132,14 @@ class ArtiqPanel(QGroupBox):
         )
         self._btn_interrupt.clicked.connect(self._on_interrupt)
         interrupt_row.addWidget(self._btn_interrupt)
+        self._btn_reconnect = QPushButton("Reconnect")
+        self._btn_reconnect.setToolTip(
+            f"Look for {ATOMIQ_SCHEDULER_HERO_NAME!r} and "
+            f"{ATOMIQ_EXPERIMENTDB_HERO_NAME!r} again. "
+            "Running experiments are not affected."
+        )
+        self._btn_reconnect.clicked.connect(self._on_reconnect)
+        interrupt_row.addWidget(self._btn_reconnect)
         interrupt_row.addStretch(1)
         layout.addLayout(interrupt_row)
 
@@ -149,6 +157,7 @@ class ArtiqPanel(QGroupBox):
         self._btn_submit_selected.setEnabled(
             enabled and self._experiment_combo.count() > 0
         )
+        self._btn_reconnect.setEnabled(enabled and not self._heroes_connecting)
         self._update_interrupt_button()
 
     def _update_interrupt_button(self) -> None:
@@ -225,6 +234,11 @@ class ArtiqPanel(QGroupBox):
             self._start_hero_connect()
 
     def _drop_scheduler(self) -> None:
+        self._drop_heroes()
+
+    def _on_reconnect(self) -> None:
+        if self._heroes_connecting:
+            return
         self._drop_heroes()
 
     def _hero_unavailable_message(self) -> str:

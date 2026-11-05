@@ -276,6 +276,8 @@ flowchart LR
 
 Default sequencer experiment key: `Sequencer_mode.py` (`ATOMIQ_SEQUENCER_MODE_EXPERIMENT_KEY`).
 
+A failed HERO connection is not retried automatically. **Reconnect** drops both stubs and runs discovery again in the background; running experiments are not affected.
+
 ### 5.6 Application startup
 
 ```mermaid
