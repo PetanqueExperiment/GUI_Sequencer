@@ -237,6 +237,7 @@ flowchart LR
 
 - `BURST_SHOTS_UNLIMITED` (-1): live mode until user pauses.
 - Scan mode uses `sync_burst_shots(n)` then `set_run_sequence(True)` per step.
+- A scan that completes all its shots restores the matrix, then returns to live mode (`prepare_live_experiment` + `resume_live_sequence`). An interrupted or failed scan stays paused.
 
 ### 5.4 Parameter scan
 

@@ -26,6 +26,7 @@ from sequencer_gui.pycam_repository import (
 )
 from sequencer_gui.pycam_experiment import (
     prepare_and_start_experiment,
+    prepare_live_experiment,
     shots_seen,
     stop_experiment_if_running,
 )
@@ -333,9 +334,10 @@ class ScanPanel(QGroupBox):
             self._begin_scan_step(next_step)
             return
         if shots_seen_count >= self._scan_expected_shots:
-            self._finish_scan()
+            self._finish_scan(resume_live=True)
 
-    def _finish_scan(self) -> None:
+    def _finish_scan(self, *, resume_live: bool = False) -> None:
+        """End the scan; ``resume_live`` restarts the unlimited run without scan tags."""
         self._pycam_poll.stop()
         self._scan_expected_shots = 0
         self._scan_points = []
@@ -352,8 +354,19 @@ class ScanPanel(QGroupBox):
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
                 stop_experiment_if_running(hero)
-        except Exception:
-            pass
+                if resume_live:
+                    prepare_live_experiment(hero)
+        except Exception as e:
+            if resume_live:
+                QMessageBox.warning(
+                    self,
+                    "Scan finished",
+                    "The scan finished, but the run without scan did not restart "
+                    f"({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
+                )
+            return
+        if resume_live:
+            self._state.resume_live_sequence()
 
     def _poll_scan_shots(self) -> None:
         if not self._state.scan_running:
@@ -368,7 +381,7 @@ class ScanPanel(QGroupBox):
                 if self._scan_points:
                     self._advance_scan_if_ready(seen)
                 elif seen >= self._scan_expected_shots:
-                    self._finish_scan()
+                    self._finish_scan(resume_live=True)
         except Exception:
             return
 
