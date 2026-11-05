@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Iterable
 
 
 # Remote HERO method invoked by this GUI when committing a static parameter.
 APPLY_STATIC_METHOD = "sequencer_apply_static"
+# Remote HERO method invoked on Detect to read back the device's current parameter values.
+READ_STATIC_METHOD = "sequencer_read_static"
 DEFAULT_APPLY_ABS_TOL = 1e-6
 
 
@@ -16,6 +19,9 @@ class DetectRowResult:
     hero_name: str
     found: bool
     error: str | None = None
+    # Current device values by ``param_id`` (only params that were read successfully).
+    values: dict[str, float] = field(default_factory=dict)
+    read_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,53 @@ def detect_remote_hero(hero_name: str) -> tuple[bool, str | None]:
             return True, None
     except Exception as e:
         return False, str(e)
+
+
+def detect_and_read_remote_hero(
+    row: int, hero_name: str, param_ids: Iterable[str]
+) -> DetectRowResult:
+    """
+    Reach a named HERO and read each ``param_id`` via ``sequencer_read_static(param_id)``.
+
+    ``found`` reflects reachability only; read failures go to ``read_error`` and the
+    params that did read are still returned in ``values``.
+    """
+    name = (hero_name or "").strip()
+    if not name:
+        return DetectRowResult(row=row, hero_name=hero_name, found=False, error="Empty HERO name")
+    try:
+        from heros import RemoteHERO
+    except ImportError as e:
+        return DetectRowResult(
+            row=row, hero_name=name, found=False, error=f"HERO not installed ({e!r})"
+        )
+    pids = [p for p in (str(x).strip() for x in param_ids) if p]
+    try:
+        with RemoteHERO(name) as hero:
+            method = getattr(hero, READ_STATIC_METHOD, None)
+            if not callable(method):
+                return DetectRowResult(
+                    row=row,
+                    hero_name=name,
+                    found=True,
+                    read_error=f"no {READ_STATIC_METHOD} method",
+                )
+            values: dict[str, float] = {}
+            failed: list[str] = []
+            for pid in pids:
+                try:
+                    values[pid] = float(method(pid))
+                except Exception as e:
+                    failed.append(f"{pid}: {e}")
+            return DetectRowResult(
+                row=row,
+                hero_name=name,
+                found=True,
+                values=values,
+                read_error="; ".join(failed) or None,
+            )
+    except Exception as e:
+        return DetectRowResult(row=row, hero_name=name, found=False, error=str(e))
 
 
 def apply_static_param(hero_name: str, param_id: str, value: float) -> float:

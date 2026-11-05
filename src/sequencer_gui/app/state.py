@@ -519,6 +519,16 @@ class SequenceAppState(QObject):
         self._commit_document(self._document.with_static_value(row, param_id, value))
         self.static_changed.emit()
 
+    def set_static_values(self, values: dict[tuple[int, str], float]) -> None:
+        """Set several ``(row, param_id) -> value`` entries in a single document commit."""
+        if not values:
+            return
+        doc = self._document
+        for (row, param_id), value in values.items():
+            doc = doc.with_static_value(row, param_id, value)
+        self._commit_document(doc)
+        self.static_changed.emit()
+
     def add_static_device(self, object_id: str | None = None) -> None:
         """Append a static device row and sync the live sequence snapshot."""
         self._commit_document(self._document.with_added_static_row(object_id))

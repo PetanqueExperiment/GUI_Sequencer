@@ -14,7 +14,9 @@ from sequencer_gui.domain.analog_stored import (
     normalize_analog_stored,
     ramp_applies_to_software,
 )
-from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object
+from sequencer_gui.software_objects import DEFAULT_ON_OBJECT, get_object, get_static_object
+
+STATIC_PARAM_INDEX_PREFIX = "s"
 
 # Change this to bump the number of device rows; older JSON is upscaled on load (see `sequence_io`).
 DEFAULT_DEVICE_ROWS: int = 43
@@ -37,6 +39,37 @@ def matrix_param_base_index(device_row: int, row_software: Tuple[str, ...]) -> i
         if r < len(row_software):
             n += len(get_object(row_software[r]).analog_parameters)
     return n
+
+
+def static_param_bindings(static_software: Tuple[str, ...]) -> Tuple[Tuple[int, str], ...]:
+    """Flattened static-panel parameters: each static row's params in GUI order."""
+    out: list[tuple[int, str]] = []
+    for r, sw in enumerate(static_software):
+        for p in get_static_object(sw).analog_parameters:
+            out.append((r, p.param_id))
+    return tuple(out)
+
+
+def static_param_base_index(static_row: int, static_software: Tuple[str, ...]) -> int:
+    """Static parameter index of the first parameter on ``static_row``."""
+    n = 0
+    for r in range(static_row):
+        if r < len(static_software):
+            n += len(get_static_object(static_software[r]).analog_parameters)
+    return n
+
+
+def format_static_param_index(index: int) -> str:
+    return f"{STATIC_PARAM_INDEX_PREFIX}{index}"
+
+
+def parse_static_param_index(text: str) -> int | None:
+    """``"s3"`` / ``"S3"`` -> ``3``; anything else -> ``None``."""
+    t = text.strip()
+    if len(t) < 2 or t[0].lower() != STATIC_PARAM_INDEX_PREFIX:
+        return None
+    digits = t[1:]
+    return int(digits) if digits.isdigit() else None
 
 
 @dataclass(frozen=True)

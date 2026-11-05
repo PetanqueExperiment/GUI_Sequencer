@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (
 
 from sequencer_gui.app.state import SequenceAppState
 from sequencer_gui.domain.document import SequenceDocument
+from sequencer_gui.domain.model import format_static_param_index, static_param_base_index
 from sequencer_gui.software_objects import get_static_object, iter_static_objects
 from sequencer_gui.software_objects.static.registry import apply_abs_tol_for
 from sequencer_gui.software_objects.types import AnalogParameterSpec
@@ -25,13 +26,14 @@ from sequencer_gui.static_remote import (
     ApplyStaticResult,
     DetectRowResult,
     apply_static_param_result,
-    detect_remote_hero,
+    detect_and_read_remote_hero,
 )
 from sequencer_gui.ui.value_input import AnalogValueLineEdit, parse_analog_value
 
 _PANEL_EXPANDED_WIDTH_PX = 340
 _COLLAPSED_STRIP_WIDTH_PX = 28
 _LABEL_MIN_WIDTH_PX = 108
+_PARAM_INDEX_WIDTH_PX = 28
 
 _STYLE_IDLE = "color: #616161;"
 _STYLE_OK = "color: #2e7d32;"
@@ -49,16 +51,19 @@ class _DetectWorker(QThread):
     finished_ok = pyqtSignal(object)  # list[DetectRowResult]
     finished_err = pyqtSignal(str)
 
-    def __init__(self, targets: list[tuple[int, str]], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        targets: list[tuple[int, str, tuple[str, ...]]],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._targets = targets
 
     def run(self) -> None:
         try:
             results: list[DetectRowResult] = []
-            for row, hero_name in self._targets:
-                found, err = detect_remote_hero(hero_name)
-                results.append(DetectRowResult(row=row, hero_name=hero_name, found=found, error=err))
+            for row, hero_name, param_ids in self._targets:
+                results.append(detect_and_read_remote_hero(row, hero_name, param_ids))
             self.finished_ok.emit(results)
         except Exception as e:
             self.finished_err.emit(str(e))
@@ -136,7 +141,8 @@ class StaticParametersPanel(QWidget):
         detect_row.setSpacing(6)
         self._detect_btn = QPushButton("Detect")
         self._detect_btn.setToolTip(
-            "Try to reach every remote static device (HERO) on the network."
+            "Try to reach every remote static device (HERO) on the network "
+            "and load its current parameter values into this panel."
         )
         self._detect_btn.clicked.connect(self._on_detect)
         detect_row.addWidget(self._detect_btn, 0)
@@ -289,12 +295,13 @@ class StaticParametersPanel(QWidget):
         if self._detect_worker is not None and self._detect_worker.isRunning():
             return
         doc = self._state.document
-        targets: list[tuple[int, str]] = []
+        targets: list[tuple[int, str, tuple[str, ...]]] = []
         for row in range(doc.static_rows):
             if not doc.static_is_remote(row):
                 continue
             name = doc.static_hero_name(row)
-            targets.append((row, name))
+            obj = get_static_object(doc.static_software_name(row))
+            targets.append((row, name, tuple(p.param_id for p in obj.analog_parameters)))
             for rw in self._row_widgets:
                 if rw.row == row:
                     rw.set_link_status("Detecting…", _STYLE_IDLE)
@@ -322,15 +329,40 @@ class StaticParametersPanel(QWidget):
         self._detect_summary.setText(f"Detected {found_n}/{total}")
         self._detect_summary.setStyleSheet(_STYLE_OK if found_n == total and total else _STYLE_ERR)
         by_row = {r.row: r for r in rows if isinstance(r, DetectRowResult)}
+        self._store_read_values(by_row.values())
         for rw in self._row_widgets:
             res = by_row.get(rw.row)
             if res is None:
                 continue
-            if res.found:
-                rw.set_link_status("Found", _STYLE_OK)
+            if res.found and res.read_error:
+                rw.set_link_status(f"Found, read failed ({res.read_error})", _STYLE_ERR)
+            elif res.found:
+                rw.set_link_status(f"Found, read {len(res.values)} value(s)", _STYLE_OK)
             else:
                 msg = res.error or "Missing"
                 rw.set_link_status(f"Missing ({msg})" if res.error else "Missing", _STYLE_ERR)
+
+    def _store_read_values(self, results) -> None:
+        """Write values read from devices into the document (rows edited meanwhile are skipped)."""
+        doc = self._state.document
+        updates: dict[tuple[int, str], float] = {}
+        for res in results:
+            if not res.found or not res.values:
+                continue
+            row = res.row
+            if not (0 <= row < doc.static_rows) or not doc.static_is_remote(row):
+                continue
+            if doc.static_hero_name(row) != res.hero_name:
+                continue
+            specs = {
+                p.param_id: p
+                for p in get_static_object(doc.static_software_name(row)).analog_parameters
+            }
+            for pid, value in res.values.items():
+                spec = specs.get(pid)
+                if spec is not None:
+                    updates[(row, pid)] = _clamp(float(value), spec.minimum, spec.maximum)
+        self._state.set_static_values(updates)
 
     def _on_detect_failed(self, message: str) -> None:
         self._detect_worker = None
@@ -467,9 +499,16 @@ class _StaticRowWidgets(QWidget):
         self._value_edits.clear()
 
         obj = get_static_object(doc.static_software_name(self.row))
-        for spec in obj.analog_parameters:
+        base = static_param_base_index(self.row, doc.static_software)
+        for pi, spec in enumerate(obj.analog_parameters):
             row = QHBoxLayout()
             row.setSpacing(6)
+            index_lab = QLabel(format_static_param_index(base + pi))
+            index_lab.setAlignment(Qt.AlignCenter)
+            index_lab.setFixedWidth(_PARAM_INDEX_WIDTH_PX)
+            index_lab.setStyleSheet("color: #78909c; font-size: 11px;")
+            index_lab.setToolTip("Static parameter index (type it in a scan card's device field)")
+            row.addWidget(index_lab)
             row.addWidget(QLabel(spec.label))
             ed = AnalogValueLineEdit(spec)
 

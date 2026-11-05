@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sequencer_gui.software_objects.protocol import SoftwareObject
+from sequencer_gui.software_objects.static.slm import SLM_ID, SlmObject
 from sequencer_gui.software_objects.static.voa import VOA_ID, VoaObject
 from sequencer_gui.software_objects.static.waveplate import WAVEPLATE_ID, WaveplateObject
 from sequencer_gui.software_objects.types import AnalogParameterSpec
@@ -67,12 +68,13 @@ def apply_abs_tol_for(object_id: str) -> float:
     return tol if tol >= 0.0 else 1e-6
 
 
-CATALOG_ORDER: tuple[str, ...] = (VOA_ID, WAVEPLATE_ID)
+CATALOG_ORDER: tuple[str, ...] = (VOA_ID, WAVEPLATE_ID, SLM_ID)
 
 
 def _build_registry() -> None:
     register(VoaObject())
     register(WaveplateObject())
+    register(SlmObject())
 
 
 _build_registry()

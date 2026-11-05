@@ -40,7 +40,11 @@ from sequencer_gui.scan_plan import (
     resolve_scan_bindings,
     static_row_for_label,
 )
-from sequencer_gui.domain.model import matrix_param_bindings
+from sequencer_gui.domain.model import (
+    matrix_param_bindings,
+    parse_static_param_index,
+    static_param_bindings,
+)
 from sequencer_gui.software_objects import get_object, get_static_object
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
@@ -441,6 +445,23 @@ class ScanPanel(QGroupBox):
             return None
         return label, param_id
 
+    def _static_param_from_index_text(self, raw: str) -> tuple[str, str] | None:
+        """``s``-prefixed 0-based static parameter index -> (static device label, param_id)."""
+        idx = parse_static_param_index(raw)
+        if idx is None:
+            return None
+        doc = self._state.document
+        bindings = static_param_bindings(doc.static_software)
+        if not (0 <= idx < len(bindings)):
+            return None
+        row, param_id = bindings[idx]
+        if not (0 <= row < len(doc.static_labels)):
+            return None
+        label = doc.static_labels[row].strip()
+        if not label:
+            return None
+        return label, param_id
+
     def _label_from_index_field_text(self, raw: str, labels: tuple[str, ...]) -> str:
         """0-based index (as in the channel matrix header) -> label; otherwise unchanged."""
         text = raw.strip()
@@ -555,8 +576,9 @@ class ScanPanel(QGroupBox):
         device_edit.setToolTip(
             "Sequence row label, static device name, or time / t to scan the "
             "selected timestep duration (µs). "
-            "Enter a 0-based matrix parameter index (# column on analog rows) "
-            "and press Enter to fill device and parameter."
+            "Enter a 0-based matrix parameter index (# column on analog rows), "
+            "or an s-prefixed static parameter index (e.g. s0, as shown in the "
+            "static parameters panel), and press Enter to fill device and parameter."
         )
         device_edit.setCompleter(QCompleter(QStringListModel(device_labels), device_edit))
         param_combo = _NoWheelComboBox()
@@ -588,6 +610,8 @@ class ScanPanel(QGroupBox):
                 param_id = "time"
             else:
                 matrix_hit = self._matrix_param_from_index_text(raw)
+                if matrix_hit is None:
+                    matrix_hit = self._static_param_from_index_text(raw)
                 if matrix_hit is not None:
                     label, param_id = matrix_hit
                 else:
