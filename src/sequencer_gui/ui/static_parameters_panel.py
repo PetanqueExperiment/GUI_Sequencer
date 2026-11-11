@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import QCoreApplication, Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QShowEvent
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -28,6 +28,7 @@ from sequencer_gui.static_remote import (
     apply_static_param_result,
     detect_and_read_remote_hero,
 )
+from sequencer_gui.static_sync import StaticChangeListener
 from sequencer_gui.ui.value_input import AnalogValueLineEdit, parse_analog_value
 
 _PANEL_EXPANDED_WIDTH_PX = 340
@@ -175,6 +176,15 @@ class StaticParametersPanel(QWidget):
         state.static_labels_changed.connect(self._sync_labels)
         state.static_changed.connect(self._sync_values)
         self._on_document_changed(state.document)
+
+        # Live mirror of values changed on the device side (HERO ``static_changed`` event).
+        self._change_listener: StaticChangeListener | None = None
+        if not state.is_read_only:
+            self._change_listener = StaticChangeListener(self)
+            self._change_listener.values_received.connect(self._on_remote_values_changed)
+            app = QCoreApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self._change_listener.close)
 
     def _on_toggle(self) -> None:
         self._expanded = not self._expanded
@@ -363,6 +373,42 @@ class StaticParametersPanel(QWidget):
                 if spec is not None:
                     updates[(row, pid)] = _clamp(float(value), spec.minimum, spec.maximum)
         self._state.set_static_values(updates)
+
+    def _on_remote_values_changed(self, hero_name: str, values: object) -> None:
+        """A device reported new values: copy them into every row bound to that HERO.
+
+        Only the document is updated (nothing is pushed back to the device); values
+        already equal to the document are skipped so echoes of our own applies are no-ops.
+        """
+        if not isinstance(values, dict):
+            return
+        doc = self._state.document
+        updates: dict[tuple[int, str], float] = {}
+        for row in range(doc.static_rows):
+            if not doc.static_is_remote(row) or doc.static_hero_name(row) != hero_name:
+                continue
+            specs = {
+                p.param_id: p
+                for p in get_static_object(doc.static_software_name(row)).analog_parameters
+            }
+            for pid, value in values.items():
+                spec = specs.get(str(pid))
+                if spec is None:
+                    continue
+                try:
+                    x = _clamp(float(value), spec.minimum, spec.maximum)
+                except (TypeError, ValueError):
+                    continue
+                if doc.static_value(row, spec.param_id) == x:
+                    continue
+                updates[(row, spec.param_id)] = x
+        if not updates:
+            return
+        self._state.set_static_values(updates)
+        synced_rows = {row for row, _ in updates}
+        for rw in self._row_widgets:
+            if rw.row in synced_rows:
+                rw.set_link_status("Synced from device", _STYLE_OK)
 
     def _on_detect_failed(self, message: str) -> None:
         self._detect_worker = None
