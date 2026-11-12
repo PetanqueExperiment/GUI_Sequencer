@@ -24,6 +24,8 @@ sequencer-gui-view = "sequencer_gui.visualizer:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# MCP server for AI agents (remote_control/mcp_server.py); never imported by the GUI.
+agent = ["mcp>=2.3,<3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

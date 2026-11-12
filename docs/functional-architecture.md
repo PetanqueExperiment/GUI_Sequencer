@@ -369,7 +369,10 @@ Constants in `process_identity.py`:
 - HEROS serves calls on zenoh threads. `GuiThreadInvoker` (`remote_control/gui_invoker.py`) takes a consistent snapshot of `SequenceAppState` on the GUI thread (5 s timeout; a call that has not started by then is cancelled). The description is built off the GUI thread by the Qt-free `remote_control/describe.py`.
 - Addressing as in the scan panel: label first, a digit string is a 0-based index. Analog cells: number, `"hold"` or `"ramp"`; the Complete view adds `resolved` values. Each reply carries a `revision` hash of the live sequence JSON.
 - Manual check: `scripts/remote_control_probe.py`.
-- Planned: edits as proposals the operator accepts in the GUI; scans through a non-UI scan controller; an MCP adapter for agents.
+
+**MCP adapter for AI agents** (`remote_control/mcp_server.py`, extra `agent` = `mcp>=2.3`). A separate process that the agent's client (Claude Code) starts over stdio; it opens a `RemoteHERO` per tool call (no state, survives GUI restarts) and never runs inside the GUI. Read-only tools: `sequencer_overview`, `sequencer_devices`, `sequencer_timeline(block, rows, include_unused)`. Replies are compact text from the Qt-free `remote_control/agent_views.py`: ON strips as column ranges, analog values only where stored (hold in between), unused rows by name only (about 5× smaller than the JSON). Registered for all sessions of the lab user: `claude mcp add --scope user sequencer -- <venv python> -m sequencer_gui.remote_control.mcp_server`.
+
+Planned: edits as proposals the operator accepts in the GUI; scans through a non-UI scan controller.
 
 ---
 
@@ -388,7 +391,7 @@ Constants in `process_identity.py`:
 | `persistence.py` | `~/.sequencer_gui/settings.json` |
 | `scan_plan.py` | Scan bindings, points, duration estimate |
 | `sequencer_hero.py` | `Sequencer_HERO` LocalHERO implementation |
-| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions |
+| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions and agent text views, MCP server |
 | `atomiq_status.py` | Scheduler snapshot |
 | `atomiq_actions.py` | Submit / interrupt experiments |
 | `pycam_experiment.py` | Live + scan PyCam calls |

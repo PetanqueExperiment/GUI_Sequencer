@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
+from sample_documents import sample_document
+from sequencer_gui.domain.document import SequenceDocument
 from sequencer_gui.remote_control.describe import (
     ScanConfig,
     describe_block,
@@ -19,41 +20,8 @@ from sequencer_gui.remote_control.describe import (
 _NO_SCAN = ScanConfig(running=False, label="", repetitions=1, parameters=())
 
 
-def _document() -> SequenceDocument:
-    """Rows: 0 = AOM 'MOT', 1 = DDS 'Cooling', 2 = TTL 'Camera'.
-
-    Blocks: 'Load' (2 cols, enabled), 'Off' (1 col, disabled), 'Image' (2 cols, enabled).
-    """
-    load = SequenceBlock(
-        name="Load",
-        enabled=True,
-        cols=2,
-        channels={(0, 0): True, (2, 1): True},
-        delays_us={0: 1000.0, 1: 50.0},
-        analog={(0, "amplitude", 0): 0.5, (0, "amplitude", 1): "ramp", (1, "frequency", 0): -12.0},
-        col_labels=("load", "ramp"),
-    )
-    off = SequenceBlock(name="Off", enabled=False, cols=1, delays_us={0: 7.0})
-    image = SequenceBlock(
-        name="Image",
-        enabled=True,
-        cols=2,
-        delays_us={0: 20.0, 1: 30.0},
-        # DDS col 0 left empty (= hold), col 1 is a ramp on a device without ramp support.
-        analog={(1, "frequency", 1): "ramp"},
-        col_labels=("img", ""),
-    )
-    return SequenceDocument(
-        rows=3,
-        row_labels=("MOT", "Cooling", "Camera"),
-        row_software=("aom", "dds", "ttl"),
-        blocks=(load, off, image),
-        static_rows=0,
-    )
-
-
 def test_overview_blocks_durations_and_start_columns() -> None:
-    doc = _document()
+    doc = sample_document()
     ov = describe_overview(doc, "C:/seq/test.json", run_sequence=True, scan=_NO_SCAN)
     assert ov["sequence_name"] == "test"
     assert [b["name"] for b in ov["blocks"]] == ["Load", "Off", "Image"]
@@ -67,7 +35,7 @@ def test_overview_blocks_durations_and_start_columns() -> None:
 
 
 def test_block_stored_cells() -> None:
-    res = describe_block(_document(), "x", "Load")
+    res = describe_block(sample_document(), "x", "Load")
     assert [c["label"] for c in res["columns"]] == ["load", "ramp"]
     mot, cooling, camera = res["rows"]
     assert mot["on"] == [True, False]
@@ -79,13 +47,13 @@ def test_block_stored_cells() -> None:
 
 
 def test_block_ramp_on_dds_plays_default() -> None:
-    res = describe_block(_document(), "x", "Image")
+    res = describe_block(sample_document(), "x", "Image")
     # Same rule as SequenceModel.analog_value: ramp on a non-ramp device plays the default (0 MHz).
     assert res["rows"][1]["params"]["frequency"]["stored"] == ["hold", 0.0]
 
 
 def test_complete_resolves_hold_across_blocks() -> None:
-    res = describe_complete(_document(), "x")
+    res = describe_complete(sample_document(), "x")
     assert [c["label"] for c in res["columns"]] == ["load", "ramp", "img", ""]
     assert [s["name"] for s in res["block_spans"]] == ["Load", "Image"]
     freq = res["rows"][1]["params"]["frequency"]
@@ -97,7 +65,7 @@ def test_complete_resolves_hold_across_blocks() -> None:
 
 
 def test_block_addressing_by_index_and_errors() -> None:
-    doc = _document()
+    doc = sample_document()
     assert describe_block(doc, "x", "2")["block"]["name"] == "Image"
     with pytest.raises(ValueError, match="Unknown block 'Nope'.*0: 'Load'"):
         describe_block(doc, "x", "Nope")
@@ -113,14 +81,14 @@ def test_block_addressing_by_index_and_errors() -> None:
 
 
 def test_revision_tracks_content() -> None:
-    doc = _document()
-    assert document_revision(doc, "x") == document_revision(_document(), "x")
+    doc = sample_document()
+    assert document_revision(doc, "x") == document_revision(sample_document(), "x")
     edited = doc.with_block(0, doc.blocks[0].with_delay_us(0, 999.0))
     assert document_revision(edited, "x") != document_revision(doc, "x")
 
 
 def test_devices_lists_ranges() -> None:
-    dev = describe_devices(_document())
+    dev = describe_devices(sample_document())
     mot = dev["rows"][0]
     assert mot["device"] == "aom" and mot["ramp_allowed"] is True
     assert mot["params"][0]["param_id"] == "amplitude"
