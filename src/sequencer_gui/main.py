@@ -16,6 +16,7 @@ from sequencer_gui.domain.document import default_document
 from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS
 from sequencer_gui.persistence import load_last_sequence_path, load_row_labels
 from sequencer_gui.process_identity import (
+    CONTROL_HERO_INSTANCE_NAME,
     HERO_INSTANCE_NAME,
     PROCESS_DISPLAY_NAME,
     SOFTWARE_PID,
@@ -134,7 +135,28 @@ def main() -> None:
         )
         window = MainWindow(state)
         window.show()
-        sys.exit(app.exec_())
+        control_hero = _start_control_hero(state)
+        try:
+            sys.exit(app.exec_())
+        finally:
+            if control_hero is not None:
+                control_hero._destroy_hero()
+
+
+def _start_control_hero(state: SequenceAppState) -> object | None:
+    """Remote control API for scripts / agents; the GUI runs normally if it cannot start."""
+    try:
+        from sequencer_gui.remote_control.control_hero import SequencerControl_HERO
+        from sequencer_gui.remote_control.gui_invoker import GuiThreadInvoker
+
+        invoker = GuiThreadInvoker(state)
+        return SequencerControl_HERO(CONTROL_HERO_INSTANCE_NAME, state, invoker)
+    except Exception as e:
+        print(
+            f"{CONTROL_HERO_INSTANCE_NAME} not started ({e!r}); remote control unavailable.",
+            file=sys.stderr,
+        )
+        return None
 
 
 if __name__ == "__main__":

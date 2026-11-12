@@ -345,6 +345,7 @@ Constants in `process_identity.py`:
 | Symbol | Value | Usage |
 |--------|-------|--------|
 | `HERO_INSTANCE_NAME` | `Sequencer_HERO` | In-process `LocalHERO`; JSON snapshot + run/burst |
+| `CONTROL_HERO_INSTANCE_NAME` | `Sequencer_Control_HERO` | Remote control API for scripts / AI agents (§8.1) |
 | `PYCAM_HERO_INSTANCE_NAME` | `PyCam_HERO` | Scan + live experiment |
 | `ATOMIQ_SCHEDULER_HERO_NAME` | `atomiq-scheduler` | Scheduler status / submit |
 | `ATOMIQ_EXPERIMENTDB_HERO_NAME` | `atomiq-experimentdb` | List experiments |
@@ -358,6 +359,17 @@ Constants in `process_identity.py`:
 - Parameter revision / ack for cross-process stale detection (`get_seq_parameters_stale`, etc.).
 
 `HeroDictBackend` (`app/hero_dict_backend.py`): on each document change, `set_sequence_data(live_sequence_file_dict(...))`; `apply(merged model)` is a no-op (snapshot carries full document).
+
+### 8.1 Remote control API (`remote_control/`)
+
+`SequencerControl_HERO` (`remote_control/control_hero.py`) is a second in-process `LocalHERO`, separate from the ARTIQ data path, for scripts and AI agents. Started in `main.py` after the main window; if it fails, the GUI runs without it (stderr warning).
+
+- **Phase 1 (current): read-only.** `get_overview()`, `get_devices()`, `get_block(block)`, `get_complete_timeline()`.
+- Every method returns a JSON string `{"ok": true, "result": …}` or `{"ok": false, "error": "…"}`.
+- HEROS serves calls on zenoh threads. `GuiThreadInvoker` (`remote_control/gui_invoker.py`) takes a consistent snapshot of `SequenceAppState` on the GUI thread (5 s timeout; a call that has not started by then is cancelled). The description is built off the GUI thread by the Qt-free `remote_control/describe.py`.
+- Addressing as in the scan panel: label first, a digit string is a 0-based index. Analog cells: number, `"hold"` or `"ramp"`; the Complete view adds `resolved` values. Each reply carries a `revision` hash of the live sequence JSON.
+- Manual check: `scripts/remote_control_probe.py`.
+- Planned: edits as proposals the operator accepts in the GUI; scans through a non-UI scan controller; an MCP adapter for agents.
 
 ---
 
@@ -376,6 +388,7 @@ Constants in `process_identity.py`:
 | `persistence.py` | `~/.sequencer_gui/settings.json` |
 | `scan_plan.py` | Scan bindings, points, duration estimate |
 | `sequencer_hero.py` | `Sequencer_HERO` LocalHERO implementation |
+| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions |
 | `atomiq_status.py` | Scheduler snapshot |
 | `atomiq_actions.py` | Submit / interrupt experiments |
 | `pycam_experiment.py` | Live + scan PyCam calls |

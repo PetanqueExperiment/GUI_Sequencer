@@ -22,6 +22,9 @@ WIN32_APP_USER_MODEL_ID = "Petanque.Sequencer.GUI.1"
 # :class:`heros.heros.LocalHERO` instance name (exposed to ARTIQ / HERO).
 HERO_INSTANCE_NAME = "Sequencer_HERO"
 
+# Remote control API for scripts / AI agents (:mod:`sequencer_gui.remote_control.control_hero`).
+CONTROL_HERO_INSTANCE_NAME = "Sequencer_Control_HERO"
+
 # PyCam for Petanque (:class:`PyCam_HERO.PyCam_HERO` in the camera GUI process).
 PYCAM_HERO_INSTANCE_NAME = "PyCam_HERO"
 

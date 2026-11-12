@@ -23,7 +23,7 @@ sequencer-gui = "sequencer_gui.main:main"
 sequencer-gui-view = "sequencer_gui.visualizer:main"
 
 [project.optional-dependencies]
-dev = []
+dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
