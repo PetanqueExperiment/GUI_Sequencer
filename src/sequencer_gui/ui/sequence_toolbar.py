@@ -30,6 +30,15 @@ from sequencer_gui.sequence_io import (
     validate_document_for_ui,
 )
 
+# Default folder for the Load… dialog (falls back to home if it does not exist).
+DEFAULT_LOAD_DIR = Path(r"C:\Users\PETANQUE-PC\Desktop\Sequences\Sequencer_json_files")
+
+
+def _load_dialog_start_dir() -> str:
+    if DEFAULT_LOAD_DIR.is_dir():
+        return str(DEFAULT_LOAD_DIR)
+    return str(Path.home())
+
 
 class SequenceToolbar(QGroupBox):
     """Name, save, and load sequence files (JSON)."""
@@ -202,7 +211,7 @@ class SequenceToolbar(QGroupBox):
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "Load sequence",
-            str(Path.home()),
+            _load_dialog_start_dir(),
             "JSON sequence (*.json);;All files (*.*)",
         )
         if not path_str:
