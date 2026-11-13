@@ -436,6 +436,18 @@ class ChannelMatrix(QGroupBox):
         state.document_changed.connect(self._on_document_changed)
         state.active_tab_changed.connect(self._on_active_tab_changed)
 
+    def timelineCellWidget(self, row: int, param_id: str, col: int) -> QWidget | None:
+        """Widget of one cell in the current view (for highlighting), or ``None``.
+
+        ``row = -1``: the delay field of ``col``; ``param_id = ""``: the ON/OFF button.
+        """
+        if row < 0:
+            return self._delay_edits[col] if 0 <= col < len(self._delay_edits) else None
+        for dr in self._device_rows:
+            if dr.logical_row == row:
+                return dr.channelButton(col) if not param_id else dr.analogEdit(param_id, col)
+        return None
+
     def commit_row_labels_to_model(self) -> None:
         for dr in self._device_rows:
             self._state.set_row_label(dr.logical_row, dr.row_edit().text())

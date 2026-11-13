@@ -61,7 +61,14 @@ class GuiThreadInvoker(QObject):
                     f"GUI call still running after {2 * timeout_s:g} s (outcome unknown)"
                 )
         if job.error is not None:
-            raise job.error
+            # Break job -> error -> traceback -> this frame -> job: the cycle would keep the caller's
+            # frames (e.g. the HEROS zenoh query) alive until GC, and zenoh only ends a reply
+            # stream when the query is freed (the client then waits for its 10 s timeout).
+            error, job.error = job.error, None
+            try:
+                raise error
+            finally:
+                del error
         return job.result
 
     @pyqtSlot(object)

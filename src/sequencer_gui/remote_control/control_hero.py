@@ -1,4 +1,4 @@
-"""``SequencerControl_HERO``: remote API for scripts and AI agents (phase 1: read-only).
+"""``SequencerControl_HERO``: remote API for scripts and AI agents (reads + proposals).
 
 Separate from :class:`sequencer_gui.sequencer_hero.Sequencer_HERO`, which is the data path read by
 ARTIQ. Every public method returns a JSON string::
@@ -26,6 +26,7 @@ from sequencer_gui.remote_control.describe import (
     describe_overview,
 )
 from sequencer_gui.remote_control.gui_invoker import GuiThreadInvoker
+from sequencer_gui.remote_control.proposal_controller import ProposalController
 
 
 class _Snapshot:
@@ -52,12 +53,18 @@ def _error(message: str) -> str:
 
 
 class SequencerControl_HERO(LocalHERO):
-    """Read the sequence open in the GUI. Create on the GUI thread, after the main window."""
+    """Read the sequence open in the GUI and submit proposals for the operator to approve.
 
-    def __init__(self, name: str, state: SequenceAppState, invoker: GuiThreadInvoker, **kwargs: Any):
+    Create on the GUI thread, after the main window. Nothing here changes the sequence directly:
+    proposals only open the approval window (see ``proposal_controller.py``).
+    """
+
+    def __init__(self, name: str, state: SequenceAppState, invoker: GuiThreadInvoker,
+                 controller: ProposalController | None = None, **kwargs: Any):
         # Private attributes are not exposed by heros (names starting with "_").
         self._state = state
         self._invoker = invoker
+        self._controller = controller
         super().__init__(name, **kwargs)
 
     def _respond(self, build: Callable[[_Snapshot], Any]) -> str:
@@ -89,3 +96,28 @@ class SequencerControl_HERO(LocalHERO):
     def get_complete_timeline(self) -> str:
         """Enabled blocks concatenated as played, with stored and resolved analog values."""
         return self._respond(lambda s: describe_complete(s.document, s.sequence_name))
+
+    def _on_gui(self, work: Callable[[ProposalController], Any]) -> str:
+        if self._controller is None:
+            return _error("proposals are not available in this GUI")
+        try:
+            return _ok(self._invoker.call(lambda: work(self._controller)))
+        except ValueError as e:
+            return _error(str(e))
+        except Exception as e:
+            return _error(f"{type(e).__name__}: {e}")
+
+    def submit_proposal(self, proposal_json: str) -> str:
+        """Open the approval window for a proposal (format: ``proposals.PROPOSAL_FORMAT_HELP``).
+
+        Returns the proposal id; nothing is applied until the operator accepts in the window.
+        """
+        try:
+            data = json.loads(proposal_json)
+        except (TypeError, ValueError) as e:
+            return _error(f"proposal is not valid JSON ({e})")
+        return self._on_gui(lambda ctl: ctl.submit(data))
+
+    def get_proposal_status(self, proposal_id: str) -> str:
+        """Operator decisions so far: changes / scan each pending, accepted, rejected, undone or dismissed."""
+        return self._on_gui(lambda ctl: ctl.status(proposal_id))

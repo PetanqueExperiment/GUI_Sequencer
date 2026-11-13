@@ -368,7 +368,8 @@ Constants in `process_identity.py`:
 
 `SequencerControl_HERO` (`remote_control/control_hero.py`) is a second in-process `LocalHERO`, separate from the ARTIQ data path, for scripts and AI agents. Started in `main.py` after the main window; if it fails, the GUI runs without it (stderr warning).
 
-- **Phase 1 (current): read-only.** `get_overview()`, `get_devices()`, `get_block(block)`, `get_complete_timeline()`.
+- **Reads:** `get_overview()`, `get_devices()`, `get_block(block)`, `get_complete_timeline()`.
+- **Proposals:** `submit_proposal(json)`, `get_proposal_status(id)` (see §8.2). Nothing in the API changes the sequence directly.
 - Every method returns a JSON string `{"ok": true, "result": …}` or `{"ok": false, "error": "…"}`.
 - HEROS serves calls on zenoh threads. `GuiThreadInvoker` (`remote_control/gui_invoker.py`) takes a consistent snapshot of `SequenceAppState` on the GUI thread (5 s timeout; a call that has not started by then is cancelled). The description is built off the GUI thread by the Qt-free `remote_control/describe.py`.
 - Addressing as in the scan panel: label first, a digit string is a 0-based index. Analog cells: number, `"hold"` or `"ramp"`; the Complete view adds `resolved` values. Each reply carries a `revision` hash of the live sequence JSON.
@@ -376,7 +377,31 @@ Constants in `process_identity.py`:
 
 **MCP adapter for AI agents** (`remote_control/mcp_server.py`, extra `agent` = `mcp>=2.3`). A separate process that the agent's client (Claude Code) starts over stdio; it opens a `RemoteHERO` per tool call (no state, survives GUI restarts) and never runs inside the GUI. Read-only tools: `sequencer_overview`, `sequencer_devices`, `sequencer_timeline(block, rows, include_unused)`. Replies are compact text from the Qt-free `remote_control/agent_views.py`: ON strips as column ranges, analog values only where stored (hold in between), unused rows by name only (about 5× smaller than the JSON). Registered for all sessions of the lab user: `claude mcp add --scope user sequencer -- <venv python> -m sequencer_gui.remote_control.mcp_server`.
 
-Planned: edits as proposals the operator accepts in the GUI; scans through a non-UI scan controller.
+MCP tools for proposals: `sequencer_propose(summary, base_revision, changes, scan)` and `sequencer_proposal_status(id)`.
+
+### 8.2 AI proposals and the approval window
+
+```mermaid
+sequenceDiagram
+    participant AI as AI agent (MCP)
+    participant H as SequencerControl_HERO
+    participant C as ProposalController (GUI thread)
+    participant W as ProposalWindow
+    participant S as SequenceAppState
+    AI->>H: submit_proposal(changes, scan, base_revision)
+    H->>C: submit (via GuiThreadInvoker)
+    C->>C: parse + check (proposals.py), revision must match
+    C->>W: open window (nothing applied)
+    W->>C: Accept n of N (ticked changes)
+    C->>S: replace_document (one step, Undo kept)
+    W->>C: Accept scan
+    C->>S: set_scan_plan (Scan panel filled, not started)
+    AI->>H: get_proposal_status(id)
+```
+
+- `remote_control/proposals.py` (no widgets): JSON shape, checks against the live document (rows, columns on the Complete timeline as label / `cN` / `N`, parameter ranges, ramp only on AOM/piezo, ON only on devices with ON/OFF, delay 0.004 µs to 1e9 µs, one change per cell), applying a subset, scan check with the Start-scan rules (`resolve_scan_bindings`).
+- `remote_control/proposal_controller.py`: one proposal at a time (a second one is refused while parts are undecided). Changes and scan are decided separately. Accept changes is refused while a scan runs or if the sequence changed since the proposal (revision check); applied with `replace_document`, one Undo while the sequence is unchanged since. Accept scan re-checks the scan and calls `SequenceAppState.set_scan_plan`; the operator starts it. Closing the window counts as "dismissed". Events are logged to `~/.sequencer_gui/ai_proposals.jsonl`.
+- `ui/proposal_window.py`: read-only preview matrix (own `SequenceAppState`), changes with tick boxes (old value red → new green), scan line with per-axis values and the current value, Show current, Accept / Reject / Undo per part. Cells are outlined via `ChannelMatrix.timelineCellWidget` (orange change, purple scanned cell). User-facing text says "AI".
 
 ---
 
@@ -396,7 +421,8 @@ Planned: edits as proposals the operator accepts in the GUI; scans through a non
 | `persistence.py` | `~/.sequencer_gui/settings.json` |
 | `scan_plan.py` | Scan bindings, points, duration estimate |
 | `sequencer_hero.py` | `Sequencer_HERO` LocalHERO implementation |
-| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions and agent text views, MCP server |
+| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions and agent text views, MCP server, AI proposals and their controller |
+| `ui/proposal_window.py` | Approval window for AI proposals |
 | `atomiq_status.py` | Scheduler snapshot |
 | `atomiq_actions.py` | Submit / interrupt experiments |
 | `pycam_experiment.py` | Live + scan PyCam calls |

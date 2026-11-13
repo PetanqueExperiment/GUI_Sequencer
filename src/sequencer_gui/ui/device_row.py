@@ -406,6 +406,21 @@ class DeviceRowWidget:
     def logical_row(self) -> int:
         return self._row
 
+    def channelButton(self, col: int) -> QPushButton | None:
+        """ON/OFF button of column ``col`` in the current view, or ``None``."""
+        return self._buttons[col] if 0 <= col < len(self._buttons) else None
+
+    def analogEdit(self, param_id: str, col: int) -> QLineEdit | None:
+        """Analog field of ``param_id`` in column ``col`` of the current view, or ``None``."""
+        obj = get_object(self._state.model.row_software_name(self._row))
+        ids = [p.param_id for p in obj.analog_parameters]
+        if param_id not in ids:
+            return None
+        k = ids.index(param_id)
+        if k >= len(self._analog_edits) or not (0 <= col < len(self._analog_edits[k])):
+            return None
+        return self._analog_edits[k][col]
+
     def row_edit(self) -> QLineEdit:
         return self._edit
 

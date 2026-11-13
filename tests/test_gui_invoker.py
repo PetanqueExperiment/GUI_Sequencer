@@ -11,11 +11,6 @@ from PyQt5.QtCore import QCoreApplication, QThread
 from sequencer_gui.remote_control.gui_invoker import GuiCallTimeout, GuiThreadInvoker
 
 
-@pytest.fixture(scope="module")
-def app() -> QCoreApplication:
-    return QCoreApplication.instance() or QCoreApplication([])
-
-
 def _from_worker(app: QCoreApplication, fn, *, run_loop_s: float = 2.0):
     """Run ``fn`` in a worker thread while the Qt event loop is pumped here; return its outcome."""
     outcome: dict = {}
@@ -51,6 +46,36 @@ def test_exception_is_reraised_in_caller(app: QCoreApplication) -> None:
 
     out = _from_worker(app, lambda: invoker.call(boom))
     assert isinstance(out["error"], ValueError)
+
+
+def test_failed_call_frees_caller_frame_without_gc(app: QCoreApplication) -> None:
+    """A stored exception must not keep the caller's locals alive (HEROS: zenoh query → 10 s stall)."""
+    import gc
+    import weakref
+
+    class Query:  # stands in for the zenoh query held by the HEROS call frame
+        pass
+
+    invoker = GuiThreadInvoker()
+
+    def boom() -> None:
+        raise ValueError("bad")
+
+    def heros_call() -> weakref.ref:
+        query = Query()
+        ref = weakref.ref(query)
+        try:
+            invoker.call(boom)
+        except ValueError:
+            pass
+        return ref
+
+    gc.disable()
+    try:
+        out = _from_worker(app, heros_call)
+        assert out["result"]() is None
+    finally:
+        gc.enable()
 
 
 def test_call_from_gui_thread_runs_directly(app: QCoreApplication) -> None:

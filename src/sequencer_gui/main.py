@@ -151,7 +151,7 @@ def main() -> None:
         _apply_initial_scan(state, initial_scan)
         window = MainWindow(state)
         window.show()
-        control_hero = _start_control_hero(state)
+        control_hero = _start_control_hero(state, window)
         try:
             sys.exit(app.exec_())
         finally:
@@ -159,14 +159,25 @@ def main() -> None:
                 control_hero._destroy_hero()
 
 
-def _start_control_hero(state: SequenceAppState) -> object | None:
+def _start_control_hero(state: SequenceAppState, window: MainWindow) -> object | None:
     """Remote control API for scripts / agents; the GUI runs normally if it cannot start."""
     try:
         from sequencer_gui.remote_control.control_hero import SequencerControl_HERO
         from sequencer_gui.remote_control.gui_invoker import GuiThreadInvoker
+        from sequencer_gui.remote_control.proposal_controller import ProposalController
+        from sequencer_gui.ui.proposal_window import ProposalWindow
 
         invoker = GuiThreadInvoker(state)
-        return SequencerControl_HERO(CONTROL_HERO_INSTANCE_NAME, state, invoker)
+        controller = ProposalController(state, parent=state)
+
+        def open_window(session) -> None:
+            w = ProposalWindow(state, controller, session, parent=window)
+            w.show()
+            w.raise_()
+            w.activateWindow()
+
+        controller.proposal_opened.connect(open_window)
+        return SequencerControl_HERO(CONTROL_HERO_INSTANCE_NAME, state, invoker, controller)
     except Exception as e:
         print(
             f"{CONTROL_HERO_INSTANCE_NAME} not started ({e!r}); remote control unavailable.",
