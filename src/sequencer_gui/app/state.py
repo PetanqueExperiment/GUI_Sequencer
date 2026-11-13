@@ -187,6 +187,21 @@ class SequenceAppState(QObject):
         self._scan_parameters = tuple(p for i, p in enumerate(self._scan_parameters) if i != index)
         self.scan_parameters_changed.emit()
 
+    def apply_scan_parameter_permutation(self, permutation: list[int]) -> None:
+        """Reorder scan axes in one step. permutation[i] is the original axis index now at position i.
+
+        The first axis is the outermost (slowest) loop of the scan; the last varies fastest.
+        Raises ``RuntimeError`` while a scan is running: the running scan owns the plan.
+        """
+        if self._scan_running:
+            raise RuntimeError("A scan is running; its parameters cannot be reordered.")
+        old = self._scan_parameters
+        n = len(old)
+        if len(permutation) != n or set(permutation) != set(range(n)):
+            raise ValueError("invalid scan parameter permutation")
+        self._scan_parameters = tuple(old[permutation[i]] for i in range(n))
+        self.scan_parameters_changed.emit()
+
     def set_scan_parameter_device_label(self, index: int, device_label: str) -> None:
         if not (0 <= index < len(self._scan_parameters)):
             return

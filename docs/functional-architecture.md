@@ -430,6 +430,7 @@ sequenceDiagram
 | `ui/channel_matrix.py` | Grid widget |
 | `ui/device_row.py` | Per-row editors |
 | `ui/block_strip.py` | Block management UI |
+| `ui/live_reorder.py` | Drag-to-reorder row of cards (☰ handle), shared by the block strip and the scan parameter cards |
 | `ui/sequence_toolbar.py` | File + run + timing labels |
 | `ui/scan_panel.py` | Scan UI + PyCam loop |
 | `ui/artiq_panel.py` | ArtiQ status and actions |

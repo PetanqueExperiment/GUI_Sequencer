@@ -3,6 +3,7 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt, QStringListModel, QTimer
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
+    QApplication,
     QCompleter,
     QFrame,
     QGroupBox,
@@ -47,6 +48,7 @@ from sequencer_gui.domain.model import (
     static_param_bindings,
 )
 from sequencer_gui.software_objects import get_object, get_static_object
+from sequencer_gui.ui.live_reorder import DragHandle, LiveReorderCanvas
 from sequencer_gui.ui.row_software_selector import _NoWheelComboBox
 
 _LABEL_STYLE_DEFAULT = "color: #212121;"
@@ -125,8 +127,10 @@ class ScanPanel(QGroupBox):
 
         row.addLayout(controls, 0)
 
-        self._cards_host = QWidget()
-        self._cards_layout = QHBoxLayout(self._cards_host)
+        self._cards_host = LiveReorderCanvas()
+        self._cards_host.drag_about_to_start.connect(self._commit_card_edit_in_progress)
+        self._cards_host.drag_finished.connect(self._on_cards_reordered)
+        self._cards_layout = self._cards_host.row_layout
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(10)
 
@@ -411,15 +415,36 @@ class ScanPanel(QGroupBox):
         self._state.set_run_sequence(False)
         self._finish_scan()
 
+    def _commit_card_edit_in_progress(self) -> None:
+        """Commit the field being typed in before a drag: its card is rebuilt afterwards."""
+        focused = QApplication.focusWidget()
+        if focused is not None and self._cards_host.isAncestorOf(focused):
+            focused.clearFocus()
+
+    def _on_cards_reordered(self, permutation: list) -> None:
+        if permutation != list(range(len(permutation))):
+            try:
+                self._state.apply_scan_parameter_permutation(permutation)
+                return
+            except (RuntimeError, ValueError):
+                pass  # plan changed or scan started during the drag: show the actual order
+        self._rebuild_param_cards()
+
     def _rebuild_param_cards(self) -> None:
+        if self._cards_host.is_dragging:
+            return  # cards are rebuilt when the drag ends
         while self._cards_layout.count():
             item = self._cards_layout.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
 
+        frames: list[QWidget] = []
         for i, p in enumerate(self._state.scan_parameters):
-            self._cards_layout.addWidget(self._make_param_card(i, p))
+            frame = self._make_param_card(i, p)
+            frames.append(frame)
+            self._cards_layout.addWidget(frame)
+        self._cards_host.register_frames(frames)
 
         self._cards_host.adjustSize()
         self._update_anticipated_duration()
@@ -560,7 +585,7 @@ class ScanPanel(QGroupBox):
     def _make_param_card(self, index: int, p: ScanParameter) -> QFrame:
         frame = QFrame()
         frame.setFrameShape(QFrame.StyledPanel)
-        frame.setFixedWidth(400)
+        frame.setFixedWidth(428)
         frame.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
 
         outer = QVBoxLayout(frame)
@@ -569,6 +594,14 @@ class ScanPanel(QGroupBox):
 
         top = QHBoxLayout()
         top.setSpacing(6)
+
+        handle = DragHandle(
+            index,
+            self._cards_host,
+            "Drag to reorder scan parameters.\n"
+            "The first card is the outer (slowest) loop; the last card varies fastest.",
+        )
+        top.addWidget(handle)
 
         btn_remove = QPushButton("\u00d7")
         btn_remove.setFixedSize(22, 22)
@@ -606,7 +639,7 @@ class ScanPanel(QGroupBox):
             self._state.set_scan_parameter_param_id(index, current_param_id)
 
         timestep_edit = QLineEdit(p.timestep_label)
-        timestep_edit.setMinimumWidth(100)
+        timestep_edit.setFixedWidth(50)
         is_static = is_static_scan_device(self._state.document, p.device_label)
         self._apply_timestep_field_mode(timestep_edit, static=is_static)
         if is_static and p.timestep_label != STATIC_TIMESTEP_LABEL:
