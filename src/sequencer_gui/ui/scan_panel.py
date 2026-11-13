@@ -301,6 +301,7 @@ class ScanPanel(QGroupBox):
                 experiment_name,
                 sequence_display_name(self._state.sequence_name),
                 self._state.document,
+                scan=self._state.scan_plan,
             )
         except (OSError, ValueError) as e:
             return (

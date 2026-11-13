@@ -263,6 +263,10 @@ Scan label availability (red/blue/green) comes from `pycam_repository.classify_s
 
 On scan start, `pycam_repository.save_scan_sequence_snapshot` writes the sequence JSON (same v8 format as the Save button) into the PyCam data folder of the scan: `{PYCAM_DATA_DIRECTORY}/{Y}/{m}/{d}/{scan label}/sequence.json`. Written after PyCam accepted the experiment name and before the first scan point is applied, so the snapshot holds the configured matrix. A reused label keeps the earlier file and writes `sequence_{HHMMSS}.json`. Failure only warns; the scan continues.
 
+**Scan saved with the sequence.** The Save button and the scan snapshot store the Scan panel in the sequence file, as an optional top-level `scan` key next to `document` (still v8): `{"label", "repetitions", "axes": [{"device", "param", "timestep", "values"}]}`, every axis field being the text shown in the panel. An empty panel (no label, no axis) writes no key. The key exists only on disk: `live_sequence_file_dict` (host sync, AI revision hash) never contains it.
+
+On Load and at startup (last sequence), `sequence_io.load_sequence_file` returns the scan and `SequenceAppState.set_scan_plan` fills the panel. A file without `scan` (all older files) leaves the panel as it is. A malformed `scan` never blocks loading: the sequence loads, the panel is left alone and a warning is shown. While a scan is running, the file's scan is not applied. Labels that no longer exist in the document are loaded as text and rejected at Start scan, as for a hand-typed scan. The visualizer ignores the key.
+
 ### 5.5 ArtiQ master panel
 
 ```mermaid
@@ -387,7 +391,8 @@ Planned: edits as proposals the operator accepts in the GUI; scans through a non
 | `app/hero_dict_backend.py` | HERO dict sync |
 | `domain/document.py` | Document, block, merge, Complete column mapping |
 | `domain/model.py` | Flat model, analog resolution (hold chain) |
-| `sequence_io.py` | JSON v8 load/save, validation, hero block import |
+| `domain/scan.py` | `ScanParameter`, `ScanPlan` (Scan panel content, no Qt) |
+| `sequence_io.py` | JSON v8 load/save (sequence + optional saved scan), validation, hero block import |
 | `persistence.py` | `~/.sequencer_gui/settings.json` |
 | `scan_plan.py` | Scan bindings, points, duration estimate |
 | `sequencer_hero.py` | `Sequencer_HERO` LocalHERO implementation |
@@ -427,7 +432,7 @@ Planned: edits as proposals the operator accepts in the GUI; scans through a non
 - **Static parameters:** UI panel present; register types in `software_objects/static/` and wire state/backend when host API is ready.
 - **Complete tab:** Edits resolve to block-local columns via `merged_enabled_timeline_col_to_block`; read-only if no block enabled (placeholder timeline).
 - **Run sequence flag:** Not persisted in JSON; host-only via HERO.
-- **Scan metadata:** Label, repetitions, parameter list are UI/state; execution ties to PyCam + matrix patching.
+- **Scan metadata:** Label, repetitions, parameter list live in `SequenceAppState` (not in `SequenceDocument`) and are saved in the sequence file under `scan` (§5.4); execution ties to PyCam + matrix patching.
 
 ---
 

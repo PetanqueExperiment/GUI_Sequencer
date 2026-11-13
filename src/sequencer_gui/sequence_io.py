@@ -1,7 +1,11 @@
 """
 Save/load sequence definitions to disk (JSON, versioned).
 
-Top-level: ``format`` / ``version`` (must match :data:`FORMAT_VERSION`) / ``name`` / ``document``.
+Top-level: ``format`` / ``version`` (must match :data:`FORMAT_VERSION`) / ``name`` / ``document``,
+plus an optional ``scan`` (content of the Scan panel when the file was saved):
+``{"label": str, "repetitions": int, "axes": [{"device", "param", "timestep", "values"}, …]}``,
+all axis fields being the text shown in the panel. Files without ``scan`` are valid; the key is
+only in files on disk, never in :func:`live_sequence_file_dict` (what is sent to the host).
 
 If a file has fewer top-level device ``rows`` than ``DEFAULT_DEVICE_ROWS`` in
 :mod:`sequencer_gui.domain.model`, it is **upgraded** on load: new rows
@@ -16,11 +20,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from sequencer_gui.domain.analog_stored import ANALOG_HOLD, ANALOG_RAMP, AnalogStored, is_holdish, is_rampish
 from sequencer_gui.domain.document import SequenceBlock, SequenceDocument
 from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS, DEFAULT_DELAY_US, SequenceModel
+from sequencer_gui.domain.scan import ScanParameter, ScanPlan
 from sequencer_gui.domain.static_defaults import (
     DEFAULT_STATIC_ROWS,
     default_static_analog,
@@ -395,22 +400,97 @@ def sequence_display_name(raw: str) -> str:
     return text
 
 
-def save_sequence(path: Path | str, name: str, document: SequenceDocument) -> None:
+_SCAN_AXIS_KEYS = ("device", "param", "timestep", "values")
+
+
+def scan_to_payload(scan: ScanPlan) -> dict[str, Any]:
+    """``scan`` section of a sequence file: the Scan panel fields as text."""
+    return {
+        "label": scan.label,
+        "repetitions": int(scan.repetitions),
+        "axes": [
+            {
+                "device": p.device_label,
+                "param": p.param_id,
+                "timestep": p.timestep_label,
+                "values": p.values_text,
+            }
+            for p in scan.parameters
+        ],
+    }
+
+
+def scan_from_payload(data: Any) -> ScanPlan:
+    """Parse the ``scan`` section; :class:`SequenceFileError` says what is wrong with it."""
+    if not isinstance(data, dict):
+        raise SequenceFileError("scan must be an object")
+    label = data.get("label", "")
+    if not isinstance(label, str):
+        raise SequenceFileError("scan label must be text")
+    repetitions = data.get("repetitions", 1)
+    if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
+        raise SequenceFileError("scan repetitions must be a positive integer")
+    axes = data.get("axes", [])
+    if not isinstance(axes, list):
+        raise SequenceFileError("scan axes must be a list")
+    parameters: list[ScanParameter] = []
+    for i, axis in enumerate(axes):
+        if not isinstance(axis, dict):
+            raise SequenceFileError(f"scan axis {i + 1} must be an object")
+        fields: list[str] = []
+        for key in _SCAN_AXIS_KEYS:
+            value = axis.get(key, "")
+            if not isinstance(value, str):
+                raise SequenceFileError(f"scan axis {i + 1}: '{key}' must be text")
+            fields.append(value)
+        parameters.append(ScanParameter(*fields))
+    return ScanPlan(label.strip(), repetitions, tuple(parameters))
+
+
+class LoadedSequence(NamedTuple):
+    """Result of :func:`load_sequence_file`."""
+
+    name: str
+    document: SequenceDocument
+    #: Scan saved with the sequence; None when the file has none (or an unreadable one).
+    scan: ScanPlan | None
+    #: Why the ``scan`` section was ignored; None when it was read or absent.
+    scan_error: str | None
+
+
+def save_sequence(
+    path: Path | str,
+    name: str,
+    document: SequenceDocument,
+    scan: ScanPlan | None = None,
+) -> None:
+    """Write the sequence file; a non-empty ``scan`` is stored with it under ``scan``."""
+    data = live_sequence_file_dict(name, document)
+    if scan is not None and not scan.is_empty():
+        data["scan"] = scan_to_payload(scan)
     p = Path(path)
-    p.write_text(
-        json.dumps(live_sequence_file_dict(name, document), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:
+    """Name and document of a sequence file (the saved scan, if any, is ignored)."""
+    loaded = load_sequence_file(path)
+    return loaded.name, loaded.document
+
+
+def load_sequence_file(path: Path | str) -> LoadedSequence:
+    """Read a sequence file with its saved scan.
+
+    A missing ``scan`` gives ``scan=None``. A malformed one never prevents loading the
+    sequence: ``scan`` is None and ``scan_error`` explains why.
+    """
     p = Path(path)
     try:
         doc = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         raise SequenceFileError(f"Could not read JSON: {e}") from e
 
-    if doc.get("format") != FORMAT_ID:
+    if not isinstance(doc, dict) or doc.get("format") != FORMAT_ID:
         raise SequenceFileError("Not a sequencer_gui sequence file (wrong format).")
     try:
         ver = int(doc["version"])
@@ -425,7 +505,15 @@ def load_sequence(path: Path | str) -> tuple[str, SequenceDocument]:
     if not isinstance(raw_document, dict):
         raise SequenceFileError("Missing document payload.")
     document = document_from_payload(raw_document)
-    return name, document
+
+    scan: ScanPlan | None = None
+    scan_error: str | None = None
+    if doc.get("scan") is not None:
+        try:
+            scan = scan_from_payload(doc["scan"])
+        except SequenceFileError as e:
+            scan_error = str(e)
+    return LoadedSequence(name, document, scan, scan_error)
 
 
 def validate_document_for_ui(document: SequenceDocument) -> str | None:

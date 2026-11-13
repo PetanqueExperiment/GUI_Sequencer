@@ -23,29 +23,43 @@ from sequencer_gui.process_identity import (
     set_windows_taskbar_app_id,
 )
 from sequencer_gui.single_instance import acquire_single_instance
-from sequencer_gui.sequence_io import SequenceFileError, load_sequence, validate_document_for_ui
+from sequencer_gui.domain.scan import ScanPlan
+from sequencer_gui.sequence_io import SequenceFileError, load_sequence_file, validate_document_for_ui
 from sequencer_gui.ui.main_window import MainWindow
 
 
-def _load_initial_sequence() -> tuple[object, str]:
-    """Return (document, sequence_name) for initial window."""
+def _load_initial_sequence() -> tuple[object, str, ScanPlan | None]:
+    """Return (document, sequence_name, scan saved with it or None) for initial window."""
     rows = DEFAULT_DEVICE_ROWS
     labels = load_row_labels(rows)
     document = default_document(labels)
     sequence_name = "Untitled"
+    scan = None
     last = load_last_sequence_path()
     if last:
         p = Path(last)
         if p.is_file():
             try:
-                _, loaded = load_sequence(p)
+                loaded = load_sequence_file(p)
             except (OSError, SequenceFileError):
                 pass
             else:
-                if validate_document_for_ui(loaded) is None:
-                    document = loaded
+                if validate_document_for_ui(loaded.document) is None:
+                    document = loaded.document
                     sequence_name = str(p.resolve())
-    return document, sequence_name
+                    scan = loaded.scan
+                    if loaded.scan_error is not None:
+                        print(
+                            f"Scan saved in {p} ignored: {loaded.scan_error}",
+                            file=sys.stderr,
+                        )
+    return document, sequence_name, scan
+
+
+def _apply_initial_scan(state: SequenceAppState, scan: ScanPlan | None) -> None:
+    """Scan panel content saved with the last sequence (before the window is built)."""
+    if scan is not None:
+        state.set_scan_plan(scan.label, scan.repetitions, scan.parameters)
 
 
 def _app_window_icon() -> QIcon:
@@ -114,7 +128,7 @@ def main() -> None:
     base.setPointSizeF(base.pointSizeF() + 1.0)
     app.setFont(base)
 
-    document, sequence_name = _load_initial_sequence()
+    document, sequence_name, initial_scan = _load_initial_sequence()
 
     try:
         from sequencer_gui.app.hero_dict_backend import HeroDictBackend
@@ -125,6 +139,7 @@ def main() -> None:
             file=sys.stderr,
         )
         state = SequenceAppState(NoOpBackend(), document=document, sequence_name=sequence_name)
+        _apply_initial_scan(state, initial_scan)
         window = MainWindow(state)
         window.show()
         sys.exit(app.exec_())
@@ -133,6 +148,7 @@ def main() -> None:
         state = SequenceAppState(
             HeroDictBackend(hero), document=document, sequence_name=sequence_name
         )
+        _apply_initial_scan(state, initial_scan)
         window = MainWindow(state)
         window.show()
         control_hero = _start_control_hero(state)

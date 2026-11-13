@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sequencer_gui.scan_plan import ScanPoint
@@ -21,19 +21,13 @@ from sequencer_gui.domain.document import (
     merged_enabled_timeline_col_to_block,
 )
 from sequencer_gui.domain.model import DEFAULT_DELAY_US, SequenceModel
+
+# ScanParameter lives in domain/scan.py (no Qt); re-exported here for existing imports.
+from sequencer_gui.domain.scan import ScanParameter, ScanPlan
 from sequencer_gui.software_objects import get_object
 
 # Tab index -1 is the "Complete" view (enabled blocks concatenated); editable like per-block tabs.
 COMPLETE_TAB_INDEX = -1
-
-
-class ScanParameter(NamedTuple):
-    """One scanned axis: device row label (or time/t for delay), param id, timestep label, values."""
-
-    device_label: str
-    param_id: str
-    timestep_label: str
-    values_text: str
 
 
 def _remap_tab_after_block_move(active: int, from_i: int, to_i: int) -> int:
@@ -236,6 +230,25 @@ class SequenceAppState(QObject):
             q if i != index else q._replace(values_text=values_text)
             for i, q in enumerate(self._scan_parameters)
         )
+
+    @property
+    def scan_plan(self) -> ScanPlan:
+        """Current content of the Scan panel (what Save writes next to the sequence)."""
+        return ScanPlan(self._scan_label, self._scan_repetitions, self._scan_parameters)
+
+    def set_scan_plan(
+        self, label: str, repetitions: int, parameters: tuple[ScanParameter, ...]
+    ) -> None:
+        """Replace label, repetitions and all axes at once (an accepted AI scan proposal, a loaded file).
+
+        Raises ``RuntimeError`` while a scan is running: the running scan owns the plan.
+        """
+        if self._scan_running:
+            raise RuntimeError("A scan is running; its plan cannot be replaced.")
+        self.set_scan_label(label)
+        self.set_scan_repetitions(repetitions)
+        self._scan_parameters = tuple(parameters)
+        self.scan_parameters_changed.emit()
 
     def set_run_sequence(self, on: bool) -> None:
         if self._run_sequence == on:

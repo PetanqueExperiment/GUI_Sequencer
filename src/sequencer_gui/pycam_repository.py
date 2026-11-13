@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 
 from sequencer_gui.domain.document import SequenceDocument
+from sequencer_gui.domain.scan import ScanPlan
 from sequencer_gui.sequence_io import save_sequence
 
 # Root used by PyCam.PyCam.DATA_DIRECTORY; override via env for non-default installs.
@@ -76,12 +77,16 @@ def save_scan_sequence_snapshot(
     document: SequenceDocument,
     *,
     data_root: str | Path | None = None,
+    scan: ScanPlan | None = None,
 ) -> Path:
-    """Write the sequence JSON into the PyCam data folder of ``experiment_name``; return its path."""
+    """Write the sequence JSON into the PyCam data folder of ``experiment_name``; return its path.
+
+    ``scan`` (the plan being started) is stored in the same file, as the Save button does.
+    """
     folder = experiment_data_directory(experiment_name, data_root)
     folder.mkdir(parents=True, exist_ok=True)
     path = _unused_sequence_path(folder)
-    save_sequence(path, sequence_name, document)
+    save_sequence(path, sequence_name, document, scan)
     return path
 
 

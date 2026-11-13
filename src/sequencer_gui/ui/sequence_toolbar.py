@@ -23,8 +23,9 @@ from sequencer_gui.persistence import save_last_sequence_path
 from sequencer_gui.process_identity import PYCAM_HERO_INSTANCE_NAME, PYCAM_LIVE_EXPERIMENT_NAME
 from sequencer_gui.pycam_experiment import prepare_live_experiment, sync_live_experiment_name
 from sequencer_gui.sequence_io import (
+    LoadedSequence,
     SequenceFileError,
-    load_sequence,
+    load_sequence_file,
     save_sequence,
     sequence_display_name,
     validate_document_for_ui,
@@ -200,7 +201,7 @@ class SequenceToolbar(QGroupBox):
             return
         resolved = str(Path(path_str).resolve())
         try:
-            save_sequence(path_str, name, self._state.document)
+            save_sequence(path_str, name, self._state.document, self._state.scan_plan)
             save_last_sequence_path(resolved)
         except OSError as e:
             QMessageBox.warning(self, "Save failed", str(e))
@@ -217,13 +218,14 @@ class SequenceToolbar(QGroupBox):
         if not path_str:
             return
         try:
-            _, document = load_sequence(path_str)
+            loaded = load_sequence_file(path_str)
         except SequenceFileError as e:
             QMessageBox.warning(self, "Load failed", str(e))
             return
         except OSError as e:
             QMessageBox.warning(self, "Load failed", str(e))
             return
+        document = loaded.document
 
         err = validate_document_for_ui(document)
         if err is not None:
@@ -234,6 +236,30 @@ class SequenceToolbar(QGroupBox):
         save_last_sequence_path(resolved)
         self._state.set_sequence_name(resolved)
         self._state.replace_document(document, active_tab=0)
+        self._apply_loaded_scan(loaded)
+
+    def _apply_loaded_scan(self, loaded: LoadedSequence) -> None:
+        """Fill the Scan panel from the file; a file without a scan leaves the panel as it is."""
+        if loaded.scan_error is not None:
+            QMessageBox.warning(
+                self,
+                "Load sequence",
+                "The sequence was loaded, but the scan saved with it could not be read "
+                f"({loaded.scan_error}).\nThe Scan panel was left unchanged.",
+            )
+            return
+        if loaded.scan is None:
+            return
+        if self._state.scan_running:
+            QMessageBox.information(
+                self,
+                "Load sequence",
+                "The sequence was loaded. The scan saved with it was not loaded "
+                "because a scan is running.",
+            )
+            return
+        scan = loaded.scan
+        self._state.set_scan_plan(scan.label, scan.repetitions, scan.parameters)
 
     def _current_sequence_file(self) -> Path | None:
         raw = self._name.text().strip()
