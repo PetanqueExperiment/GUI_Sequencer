@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         top_row_layout.setContentsMargins(0, 0, 0, 0)
         top_row_layout.setSpacing(10)
         toolbar = SequenceToolbar(state)
+        self._toolbar = toolbar
         top_row_layout.addWidget(toolbar, 0, Qt.AlignLeft)
         self._artiq_panel = ArtiqPanel()
         top_row_layout.addWidget(self._artiq_panel, 0)
@@ -70,6 +71,14 @@ class MainWindow(QMainWindow):
         self._run_poll.start(300)
 
         self._sync_tab_titles()
+
+    @property
+    def scan_panel(self) -> ScanPanel:
+        return self._scan_panel
+
+    @property
+    def sequence_toolbar(self) -> SequenceToolbar:
+        return self._toolbar
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

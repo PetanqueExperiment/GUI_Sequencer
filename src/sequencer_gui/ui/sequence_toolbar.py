@@ -149,22 +149,34 @@ class SequenceToolbar(QGroupBox):
             else:
                 sync_live_experiment_name(hero)
 
+    def set_live_run(self, on: bool) -> str | None:
+        """Run without scan (``True``) or pause, as the Running / Paused button does.
+
+        Returns why it could not, or ``None``. Refused while a scan is running.
+        """
+        if self._state.scan_running:
+            return "A scan is running."
+        try:
+            self._sync_pycam_live_experiment(start=on)
+        except Exception as e:
+            return str(e)
+        if on:
+            self._state.resume_live_sequence()
+        else:
+            self._state.set_run_sequence(False)
+        return None
+
     def _on_run_toggled(self, checked: bool) -> None:
         if self._state.scan_running:
             return
-        try:
-            self._sync_pycam_live_experiment(start=checked)
-        except Exception as e:
-            QMessageBox.warning(self, "Run / pause", str(e))
+        error = self.set_live_run(checked)
+        if error is not None:
+            QMessageBox.warning(self, "Run / pause", error)
             self._run_btn.blockSignals(True)
             self._run_btn.setChecked(not checked)
             self._run_btn.blockSignals(False)
             self._update_run_button_text(not checked)
             return
-        if checked:
-            self._state.resume_live_sequence()
-        else:
-            self._state.set_run_sequence(False)
         self._update_run_button_text(checked)
 
     def _on_run_sequence_changed(self, on: bool) -> None:

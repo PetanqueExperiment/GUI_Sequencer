@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt, QStringListModel, QTimer
+import sys
+
+from PyQt5.QtCore import Qt, QStringListModel, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QApplication,
@@ -64,9 +66,19 @@ _LABEL_TOOLTIP = (
     "Green: scan in progress with this name."
 )
 
+# How a scan ended (``ScanPanel.scan_ended``).
+SCAN_COMPLETED = "completed"
+SCAN_STOPPED = "stopped"
+SCAN_FAILED = "failed"
+
 
 class ScanPanel(QGroupBox):
     """Scan configuration: matrix values per step, repetitions per value, PyCam tagging."""
+
+    #: (shots PyCam has saved, shots planned) while a scan runs.
+    scan_progress = pyqtSignal(int, int)
+    #: (SCAN_COMPLETED / SCAN_STOPPED / SCAN_FAILED, message) when a scan has ended.
+    scan_ended = pyqtSignal(str, str)
 
     def __init__(self, state: SequenceAppState, parent: QWidget | None = None) -> None:
         super().__init__("Scan", parent)
@@ -174,6 +186,8 @@ class ScanPanel(QGroupBox):
         self._scan_repetitions = 1
         self._scan_points: list = []
         self._scan_step_index = 0
+        # False while a scan started by the Sequence Scheduler runs: no message boxes then.
+        self._scan_attended = True
         self._pycam_poll = QTimer(self)
         self._pycam_poll.timeout.connect(self._poll_scan_shots)
 
@@ -239,15 +253,35 @@ class ScanPanel(QGroupBox):
         self._btn_add_param.setEnabled(not running)
         self._cards_scroll.setEnabled(not running)
 
+    def _notify(self, title: str, text: str) -> None:
+        """Warn the operator; during a scan started by the scheduler, only log it (stderr)."""
+        if self._scan_attended:
+            QMessageBox.warning(self, title, text)
+        else:
+            print(f"{title}: {text}", file=sys.stderr)
+
     def _on_start_scan(self) -> None:
         if self._state.scan_running:
             return
+        error = self.start_scan()
+        if error is not None:
+            QMessageBox.warning(self, "Start scan", error)
+
+    def start_scan(self, *, attended: bool = True) -> str | None:
+        """Start the scan configured in the panel, as the Start scan button does.
+
+        Returns why the scan did not start, or ``None`` once it was started. The end of the scan
+        is reported by ``scan_ended``. With ``attended=False`` (a scan started by the Sequence
+        Scheduler) no message box opens during the scan: problems go to ``scan_ended`` and stderr,
+        so an unattended scan never waits for someone to click OK.
+        """
+        if self._state.scan_running:
+            return "A scan is already running."
         self._on_label_edited()
         self._on_repetitions_edited()
         name = self._state.scan_label.strip()
         if not name:
-            QMessageBox.warning(self, "Start scan", "Enter a scan label (PyCam experiment name).")
-            return
+            return "Enter a scan label (PyCam experiment name)."
         shots = self._state.scan_repetitions
         try:
             if self._state.scan_parameters:
@@ -255,8 +289,7 @@ class ScanPanel(QGroupBox):
             scan_points = self._state.build_scan_points()
             scan_tags = build_scan_tags(self._state.scan_parameters, shots)
         except ValueError as e:
-            QMessageBox.warning(self, "Start scan", str(e))
-            return
+            return str(e)
         self._scan_expected_shots = len(scan_tags)
         self._scan_repetitions = shots
         self._scan_points = scan_points
@@ -264,39 +297,35 @@ class ScanPanel(QGroupBox):
 
         self._state.set_run_sequence(False)
         if self._state.run_sequence:
-            QMessageBox.warning(self, "Start scan", "Sequence did not pause.")
-            return
+            return "Sequence did not pause."
 
         try:
             from heros import RemoteHERO
         except ImportError:
-            QMessageBox.warning(
-                self,
-                "Start scan",
-                "HERO support is not installed; cannot reach PyCam.",
-            )
-            return
+            return "HERO support is not installed; cannot reach PyCam."
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as pycam_hero:
                 prepare_and_start_experiment(pycam_hero, name, scan_tags=scan_tags)
         except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Start scan",
-                f"PyCam scan start failed ({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
-            )
-            return
+            return f"PyCam scan start failed ({PYCAM_HERO_INSTANCE_NAME}):\n{e}"
 
+        self._scan_attended = attended
         # Snapshot before the first scan point is applied: matrix as configured, not mid-scan.
         snapshot_error = self._save_sequence_with_scan_data(name)
 
         self._state.prepare_scan_matrix_restore()
         self._state.set_scan_running(True)
+        self.scan_progress.emit(0, self._scan_expected_shots)
         self._begin_scan_step(0)
         self._pycam_poll.start(500)
 
         if snapshot_error is not None:
-            QMessageBox.warning(self, "Start scan", snapshot_error)
+            # Not _notify: the first scan step may already have ended the scan (attended reset).
+            if attended:
+                QMessageBox.warning(self, "Start scan", snapshot_error)
+            else:
+                print(f"Start scan: {snapshot_error}", file=sys.stderr)
+        return None
 
     def _save_sequence_with_scan_data(self, experiment_name: str) -> str | None:
         """Write the sequence JSON into PyCam's data folder; error message on failure."""
@@ -326,8 +355,8 @@ class ScanPanel(QGroupBox):
         try:
             self._state.apply_scan_point(self._scan_points[step_index])
         except RuntimeError as e:
-            QMessageBox.warning(self, "Scan", str(e))
-            self._finish_scan()
+            self._notify("Scan", str(e))
+            self._finish_scan(SCAN_FAILED, str(e))
             return
         self._state.resume_sequence_for_scan_shots(self._scan_repetitions)
 
@@ -339,39 +368,43 @@ class ScanPanel(QGroupBox):
             self._begin_scan_step(next_step)
             return
         if shots_seen_count >= self._scan_expected_shots:
-            self._finish_scan(resume_live=True)
+            self._finish_scan(SCAN_COMPLETED)
 
-    def _finish_scan(self, *, resume_live: bool = False) -> None:
-        """End the scan; ``resume_live`` restarts the unlimited run without scan tags."""
-        self._pycam_poll.stop()
-        self._scan_expected_shots = 0
-        self._scan_points = []
-        self._scan_step_index = 0
-        if self._state.run_sequence:
-            self._state.set_run_sequence(False)
-        self._state.restore_scan_matrix()
-        self._state.set_scan_running(False)
-        self._state.poll_host_run_sequence()
+    def _finish_scan(self, outcome: str, message: str = "") -> None:
+        """End the scan; a completed one restarts the unlimited run without scan tags."""
+        resume_live = outcome == SCAN_COMPLETED
         try:
-            from heros import RemoteHERO
-        except ImportError:
-            return
-        try:
-            with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
-                stop_experiment_if_running(hero)
+            self._pycam_poll.stop()
+            self._scan_expected_shots = 0
+            self._scan_points = []
+            self._scan_step_index = 0
+            if self._state.run_sequence:
+                self._state.set_run_sequence(False)
+            self._state.restore_scan_matrix()
+            self._state.set_scan_running(False)
+            self._state.poll_host_run_sequence()
+            try:
+                from heros import RemoteHERO
+            except ImportError:
+                return
+            try:
+                with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
+                    stop_experiment_if_running(hero)
+                    if resume_live:
+                        prepare_live_experiment(hero)
+            except Exception as e:
                 if resume_live:
-                    prepare_live_experiment(hero)
-        except Exception as e:
+                    message = (
+                        "The scan finished, but the run without scan did not restart "
+                        f"({PYCAM_HERO_INSTANCE_NAME}):\n{e}"
+                    )
+                    self._notify("Scan finished", message)
+                return
             if resume_live:
-                QMessageBox.warning(
-                    self,
-                    "Scan finished",
-                    "The scan finished, but the run without scan did not restart "
-                    f"({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
-                )
-            return
-        if resume_live:
-            self._state.resume_live_sequence()
+                self._state.resume_live_sequence()
+        finally:
+            self._scan_attended = True
+            self.scan_ended.emit(outcome, message)
 
     def _poll_scan_shots(self) -> None:
         if not self._state.scan_running:
@@ -383,37 +416,39 @@ class ScanPanel(QGroupBox):
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
                 seen = shots_seen(hero)
+                self.scan_progress.emit(
+                    min(max(0, seen), self._scan_expected_shots), self._scan_expected_shots
+                )
                 if self._scan_points:
                     self._advance_scan_if_ready(seen)
                 elif seen >= self._scan_expected_shots:
-                    self._finish_scan(resume_live=True)
+                    self._finish_scan(SCAN_COMPLETED)
         except Exception:
             return
 
     def _on_interrupt(self) -> None:
         if not self._state.scan_running:
             return
+        error = self.interrupt_scan()
+        if error is not None:
+            QMessageBox.warning(self, "Interrupt", error)
+
+    def interrupt_scan(self) -> str | None:
+        """Stop the running scan, as the Interrupt button does; returns why it could not, or None."""
+        if not self._state.scan_running:
+            return None
         try:
             from heros import RemoteHERO
         except ImportError:
-            QMessageBox.warning(
-                self,
-                "Interrupt",
-                "HERO support is not installed; cannot reach PyCam.",
-            )
-            return
+            return "HERO support is not installed; cannot reach PyCam."
         try:
             with RemoteHERO(PYCAM_HERO_INSTANCE_NAME) as hero:
                 stop_experiment_if_running(hero)
         except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Interrupt",
-                f"Failed to stop PyCam ({PYCAM_HERO_INSTANCE_NAME}):\n{e}",
-            )
-            return
+            return f"Failed to stop PyCam ({PYCAM_HERO_INSTANCE_NAME}):\n{e}"
         self._state.set_run_sequence(False)
-        self._finish_scan()
+        self._finish_scan(SCAN_STOPPED)
+        return None
 
     def _commit_card_edit_in_progress(self) -> None:
         """Commit the field being typed in before a drag: its card is rebuilt afterwards."""

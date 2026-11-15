@@ -2,7 +2,7 @@
 
 This document describes how **Petanque Sequencer** works: purpose, layers, data model, integration with HERO/ARTIQ/PyCam, and main control flows. It is intended for onboarding, design reviews, and future development.
 
-**Last aligned with codebase:** May 2026.
+**Last aligned with codebase:** November 2026.
 
 ---
 
@@ -294,9 +294,12 @@ flowchart TD
     HERO_OK -->|no| NOOP[NoOpBackend stderr warning]
     WITH --> WIN[MainWindow.show]
     NOOP --> WIN
+    WIN --> LINK[Scheduler link: local IPC server]
 ```
 
 Bypass single instance: `SEQUENCER_ALLOW_MULTIPLE=1`. Optional HERO preload: `SEQUENCER_HERO_INIT_JSON`.
+
+The scheduler link (§8.3) starts in both branches, with or without HERO; if it cannot listen (e.g. a second GUI with `SEQUENCER_ALLOW_MULTIPLE`), stderr says why and the GUI runs normally.
 
 ---
 
@@ -405,6 +408,39 @@ sequenceDiagram
 
 ---
 
+### 8.3 Sequence Scheduler link (`remote_control/scheduler_link.py`)
+
+The **Sequence Scheduler** (separate program and repository) runs saved scans at fixed times or from a queue, and an optional free-run sequence between them. It talks to this GUI over a Qt local server (named pipe on Windows) — not HEROS. Names, limits and the request list are in `scheduler_protocol.py`, which the scheduler imports from the installed package.
+
+```mermaid
+sequenceDiagram
+    participant SCH as Sequence Scheduler
+    participant L as SchedulerLink (GUI thread)
+    participant SP as ScanPanel
+    participant S as SequenceAppState
+    SCH->>L: start_scan(path, task_id)
+    L-->>SCH: starting
+    L->>S: load file (as the Load button), scan plan from the file
+    L->>SP: start_scan(attended=False)
+    SP-->>L: scan_progress(shots, total)
+    SCH->>L: get_task_status (every ~1 s)
+    SP-->>L: scan_ended(completed / stopped / failed, message)
+    SCH->>L: get_task_status → completed: next task
+```
+
+- **Same paths as the operator:** `ScanPanel.start_scan` / `interrupt_scan` (the Start scan and Interrupt buttons call them too) and `SequenceToolbar.set_live_run` (Running / Paused). Nothing is sent to ARTIQ or PyCam that manual use would not send.
+- **Unattended scans:** with `attended=False`, the scan panel opens no message box until the scan ends; problems go to `scan_ended` (and stderr) and the scheduler pauses its queue.
+- **Never takes over:** refused while the operator's scan runs or a modal dialog is open (the scheduler retries). An operator Interrupt of a scheduled scan reports `stopped`. Free-run is paused only if it is still the sequence the scheduler started.
+- **Unsaved work:** if the open sequence differs from its file, it is saved to `~/.sequencer_gui/replaced_by_scheduler/` before the scheduled file replaces it. A loaded file becomes the last sequence (`persistence`), as with Load.
+- **Task state:** kept for the last 50 task ids, so a repeated `start_scan` does not start twice and a finished task can still be queried.
+- Tests: `tests/test_scheduler_link.py` (real scan panel and toolbar, fake PyCam, real local socket).
+
+**Simulator** (`simulator.py`, `python -m sequencer_gui.simulator [--speed FACTOR]` or `Start_Sequencer_Simulator.bat`): a separate hardware-free window that answers the same requests on `SEQUENCER_SIMULATION_SERVER_NAME` and plays scans as a progress bar (`FACTOR` × faster), with Interrupt / Make scan fail buttons. It reads sequence files like the GUI but never imports HERO, ARTIQ or PyCam code. The scheduler uses it when started with `--simulate-sequencer`. Tests: `tests/test_simulator.py`.
+
+Tests in general run on the lab PC next to the live experiment: `tests/conftest.py` makes every HERO class refuse to connect (tests that need PyCam install a fake), and IPC tests use their own server names.
+
+---
+
 ## 9. Module reference
 
 | Module / package | Function |
@@ -421,7 +457,9 @@ sequenceDiagram
 | `persistence.py` | `~/.sequencer_gui/settings.json` |
 | `scan_plan.py` | Scan bindings, points, duration estimate |
 | `sequencer_hero.py` | `Sequencer_HERO` LocalHERO implementation |
-| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions and agent text views, MCP server, AI proposals and their controller |
+| `remote_control/` | `SequencerControl_HERO` remote API, GUI-thread invoker, Qt-free descriptions and agent text views, MCP server, AI proposals and their controller, Sequence Scheduler link |
+| `scheduler_protocol.py` | IPC names, limits and task states shared with the Sequence Scheduler |
+| `simulator.py` | Hardware-free sequencer stand-in for trying the Sequence Scheduler |
 | `ui/proposal_window.py` | Approval window for AI proposals |
 | `atomiq_status.py` | Scheduler snapshot |
 | `atomiq_actions.py` | Submit / interrupt experiments |
@@ -432,7 +470,7 @@ sequenceDiagram
 | `ui/block_strip.py` | Block management UI |
 | `ui/live_reorder.py` | Drag-to-reorder row of cards (☰ handle), shared by the block strip and the scan parameter cards |
 | `ui/sequence_toolbar.py` | File + run + timing labels |
-| `ui/scan_panel.py` | Scan UI + PyCam loop |
+| `ui/scan_panel.py` | Scan UI + PyCam loop; `start_scan` / `interrupt_scan`, `scan_progress` / `scan_ended` signals |
 | `ui/artiq_panel.py` | ArtiQ status and actions |
 | `ui/static_parameters_panel.py` | Static params sidebar |
 
@@ -448,7 +486,7 @@ sequenceDiagram
 | atomiq / ARTIQ master | Optional; ArtiqPanel |
 | PyCam HERO | Optional; scan and live run |
 
-**Run:** `python -m sequencer_gui` or console script `sequencer-gui`.
+**Run:** `python -m sequencer_gui` or console script `sequencer-gui`. Simulator for the Sequence Scheduler: `python -m sequencer_gui.simulator`.
 
 **Without heros:** GUI runs with `NoOpBackend` (no live dict sync); stderr warns on import failure.
 
@@ -469,6 +507,7 @@ When changing behavior, update this doc if you alter:
 
 - `FORMAT_VERSION` or JSON schema (`sequence_io.py`)
 - HERO instance names (`process_identity.py`)
+- Scheduler IPC names or requests (`scheduler_protocol.py`; the scheduler must match)
 - Default row count (`DEFAULT_DEVICE_ROWS` in `domain/model.py`)
 - Dynamical catalog (`dynamical/registry.py` `CATALOG_ORDER`)
 - Main window composition (`ui/main_window.py`)

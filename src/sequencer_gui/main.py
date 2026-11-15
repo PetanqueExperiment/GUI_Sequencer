@@ -142,7 +142,12 @@ def main() -> None:
         _apply_initial_scan(state, initial_scan)
         window = MainWindow(state)
         window.show()
-        sys.exit(app.exec_())
+        scheduler_link = _start_scheduler_link(state, window)
+        try:
+            sys.exit(app.exec_())
+        finally:
+            if scheduler_link is not None:
+                scheduler_link.close()
 
     with Sequencer_HERO(HERO_INSTANCE_NAME) as hero:
         state = SequenceAppState(
@@ -152,11 +157,28 @@ def main() -> None:
         window = MainWindow(state)
         window.show()
         control_hero = _start_control_hero(state, window)
+        scheduler_link = _start_scheduler_link(state, window)
         try:
             sys.exit(app.exec_())
         finally:
+            if scheduler_link is not None:
+                scheduler_link.close()
             if control_hero is not None:
                 control_hero._destroy_hero()
+
+
+def _start_scheduler_link(state: SequenceAppState, window: MainWindow) -> object | None:
+    """Local link for the Sequence Scheduler; the GUI runs normally if it cannot start."""
+    try:
+        from sequencer_gui.remote_control.scheduler_link import SchedulerLink
+
+        link = SchedulerLink(state, window.scan_panel, window.sequence_toolbar)
+    except Exception as e:
+        print(f"Scheduler link not started ({e!r}).", file=sys.stderr)
+        return None
+    if not link.listening:
+        print(f"Scheduler link unavailable: {link.error}", file=sys.stderr)
+    return link
 
 
 def _start_control_hero(state: SequenceAppState, window: MainWindow) -> object | None:
