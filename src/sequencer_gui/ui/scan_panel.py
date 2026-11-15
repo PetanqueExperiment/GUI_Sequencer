@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from PyQt5.QtCore import Qt, QStringListModel, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
@@ -27,6 +28,13 @@ from sequencer_gui.pycam_repository import (
     classify_scan_label,
     save_scan_sequence_snapshot,
 )
+from sequencer_gui.remote_control.scheduler_client import (
+    SchedulerQueueError,
+    connect_to_scheduler,
+    save_queued_scan,
+    send_queue_scan,
+)
+from sequencer_gui.scheduler_protocol import SCHEDULER_SERVER_NAME
 from sequencer_gui.pycam_experiment import (
     prepare_and_start_experiment,
     prepare_live_experiment,
@@ -65,6 +73,8 @@ _LABEL_TOOLTIP = (
     "Blue: name already used today.\n"
     "Green: scan in progress with this name."
 )
+
+_QUEUE_BUTTON_TEXT = "Queue in scheduler"
 
 # How a scan ended (``ScanPanel.scan_ended``).
 SCAN_COMPLETED = "completed"
@@ -128,6 +138,14 @@ class ScanPanel(QGroupBox):
         scan_actions.addWidget(self._btn_interrupt)
         controls.addLayout(scan_actions)
 
+        self._btn_queue_scan = QPushButton(_QUEUE_BUTTON_TEXT)
+        self._btn_queue_scan.setToolTip(
+            "Add this scan to the Sequence Scheduler's queue.\n"
+            "The sequence and scan are saved now and held for the scheduler; later edits here\n"
+            "do not change the queued scan. When it runs, the sequence is saved with the data."
+        )
+        self._btn_queue_scan.clicked.connect(self._on_queue_in_scheduler)
+
         self._duration_label = QLabel()
         self._duration_label.setToolTip(
             "Estimated total sequence runtime for all scan points and repetitions "
@@ -159,7 +177,13 @@ class ScanPanel(QGroupBox):
         self._btn_add_param.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._btn_add_param.setToolTip("Add a parameter axis to the scan (name and list of values)")
         self._btn_add_param.clicked.connect(self._state.add_scan_parameter)
-        row.addWidget(self._btn_add_param, 0, Qt.AlignTop)
+        # Right column: Add parameter at the top, Queue in scheduler at the bottom.
+        right_column = QVBoxLayout()
+        right_column.setSpacing(6)
+        right_column.addWidget(self._btn_add_param, 0, Qt.AlignRight)
+        right_column.addStretch(1)
+        right_column.addWidget(self._btn_queue_scan, 0, Qt.AlignRight)
+        row.addLayout(right_column, 0)
 
         state.scan_label_changed.connect(self._sync_label_from_state)
         state.scan_repetitions_changed.connect(self._sync_repetitions_from_state)
@@ -188,6 +212,8 @@ class ScanPanel(QGroupBox):
         self._scan_step_index = 0
         # False while a scan started by the Sequence Scheduler runs: no message boxes then.
         self._scan_attended = True
+        # Sequence JSON saved next to the PyCam data at the last Start scan.
+        self.last_snapshot_path: Path | None = None
         self._pycam_poll = QTimer(self)
         self._pycam_poll.timeout.connect(self._poll_scan_shots)
 
@@ -248,6 +274,8 @@ class ScanPanel(QGroupBox):
         self._btn_start_scan.setEnabled(not running)
         self._btn_start_scan.setText("Scan running" if running else "Start scan")
         self._btn_interrupt.setEnabled(running)
+        # During a scan the matrix holds scan-point values, not the configured sequence.
+        self._btn_queue_scan.setEnabled(not running)
         self._label.setEnabled(not running)
         self._repetitions.setEnabled(not running)
         self._btn_add_param.setEnabled(not running)
@@ -266,6 +294,69 @@ class ScanPanel(QGroupBox):
         error = self.start_scan()
         if error is not None:
             QMessageBox.warning(self, "Start scan", error)
+
+    def _check_scan_config(self) -> str | None:
+        """Why the configured scan cannot run (the Start scan checks), or ``None``."""
+        self._on_label_edited()
+        self._on_repetitions_edited()
+        if not self._state.scan_label.strip():
+            return "Enter a scan label (PyCam experiment name)."
+        try:
+            if self._state.scan_parameters:
+                resolve_scan_bindings(self._state.document, self._state.scan_parameters)
+            self._state.build_scan_points()
+            build_scan_tags(self._state.scan_parameters, self._state.scan_repetitions)
+        except ValueError as e:
+            return str(e)
+        return None
+
+    def _on_queue_in_scheduler(self) -> None:
+        error = self.queue_in_scheduler()
+        if error is not None:
+            QMessageBox.warning(self, "Queue in scheduler", error)
+
+    def queue_in_scheduler(self, *, server_name: str = SCHEDULER_SERVER_NAME) -> str | None:
+        """Save the configured sequence and scan for the scheduler and queue it there.
+
+        The file is held in ``SCHEDULER_QUEUE_DIR`` as ``<label>.json``, so later edits here do
+        not change the queued scan; when the scan runs, Start scan saves the usual copy with the
+        data. Nothing is written if the scheduler is not running. Returns why the scan was not
+        queued, or ``None``.
+        """
+        if self._state.scan_running:
+            return "Wait for the running scan to end before queueing another one."
+        problem = self._check_scan_config()
+        if problem is not None:
+            return problem
+        name = self._state.scan_label.strip()
+        try:
+            socket = connect_to_scheduler(server_name)
+        except SchedulerQueueError as e:
+            return str(e)
+        try:
+            path = save_queued_scan(
+                name,
+                sequence_display_name(self._state.sequence_name),
+                self._state.document,
+                self._state.scan_plan,
+            )
+        except (OSError, ValueError) as e:
+            socket.abort()
+            return f"The sequence could not be saved for the scheduler:\n{e}"
+        try:
+            reply = send_queue_scan(socket, path)
+        except SchedulerQueueError as e:
+            return f"The scheduler did not queue the scan:\n{e}\n\nThe sequence was saved to:\n{path}"
+        position = reply.get("queue_position")
+        self._btn_queue_scan.setText(
+            f"Queued · position {position}" if isinstance(position, int) else "Queued"
+        )
+        self._btn_queue_scan.setToolTip(f"Last queued: {path}")
+        QTimer.singleShot(3000, self._reset_queue_button_text)
+        return None
+
+    def _reset_queue_button_text(self) -> None:
+        self._btn_queue_scan.setText(_QUEUE_BUTTON_TEXT)
 
     def start_scan(self, *, attended: bool = True) -> str | None:
         """Start the scan configured in the panel, as the Start scan button does.
@@ -328,9 +419,13 @@ class ScanPanel(QGroupBox):
         return None
 
     def _save_sequence_with_scan_data(self, experiment_name: str) -> str | None:
-        """Write the sequence JSON into PyCam's data folder; error message on failure."""
+        """Write the sequence JSON into PyCam's data folder; error message on failure.
+
+        Its path is kept in ``last_snapshot_path`` (``None`` if it could not be written).
+        """
+        self.last_snapshot_path = None
         try:
-            save_scan_sequence_snapshot(
+            self.last_snapshot_path = save_scan_sequence_snapshot(
                 experiment_name,
                 sequence_display_name(self._state.sequence_name),
                 self._state.document,

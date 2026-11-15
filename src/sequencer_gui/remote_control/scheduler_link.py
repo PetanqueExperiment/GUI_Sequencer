@@ -31,6 +31,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication
 
 from sequencer_gui.persistence import save_last_sequence_path
+from sequencer_gui.remote_control.scheduler_client import is_queued_scan_file
 from sequencer_gui.scan_plan import expected_shot_count
 from sequencer_gui.scheduler_protocol import (
     MAX_IPC_LINE_BYTES,
@@ -327,6 +328,25 @@ class SchedulerLink(QObject):
         else:
             task.state = TASK_STOPPED  # interrupted, by the scheduler or the operator
         self._task = None
+        if task.state != TASK_FAILED:
+            self._remove_held_queue_file(task.path)  # a failed scan is queued again: keep it
+
+    def _remove_held_queue_file(self, path: Path) -> None:
+        """Delete a file held for "Queue in scheduler" once its scan is over (its copy is in the data)."""
+        if not is_queued_scan_file(path) or str(path) == self._state.sequence_name:
+            return  # never the file the GUI still shows (no copy was saved with the data)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            print(f"Scheduler link: could not remove {path}: {error}", file=sys.stderr)
+
+    def _show_data_copy(self, task: ScanTask) -> None:
+        """For a held queue file, point the GUI (and the next start) at the copy saved with the data."""
+        snapshot = self._panel.last_snapshot_path
+        if snapshot is None or not is_queued_scan_file(task.path):
+            return
+        self._state.set_sequence_name(str(snapshot))
+        save_last_sequence_path(str(snapshot))
 
     # --- helpers -----------------------------------------------------------------------------------
 
@@ -419,7 +439,9 @@ class SchedulerLink(QObject):
             error = str(e) if isinstance(e, LinkError) else f"{type(e).__name__}: {e}"
         if error is not None:
             self._fail(task, error)
-        elif task.state == TASK_STARTING:  # not already ended by its first scan step
+            return
+        self._show_data_copy(task)
+        if task.state == TASK_STARTING:  # not already ended by its first scan step
             task.state = TASK_RUNNING
 
     def _fail(self, task: ScanTask, error: str) -> None:

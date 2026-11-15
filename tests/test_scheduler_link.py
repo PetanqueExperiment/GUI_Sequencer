@@ -28,7 +28,7 @@ from sequencer_gui.app.state import SequenceAppState  # noqa: E402
 from sequencer_gui.domain.document import default_document  # noqa: E402
 from sequencer_gui.domain.model import DEFAULT_DEVICE_ROWS  # noqa: E402
 from sequencer_gui.domain.scan import ScanParameter, ScanPlan  # noqa: E402
-from sequencer_gui.remote_control import scheduler_link  # noqa: E402
+from sequencer_gui.remote_control import scheduler_client, scheduler_link  # noqa: E402
 from sequencer_gui.remote_control.scheduler_link import (  # noqa: E402
     LinkError,
     ScanTask,
@@ -232,6 +232,43 @@ def test_scan_runs_to_completion(link):
     loaded = load_sequence_file(link.scan_path).document
     assert link.state.document.blocks[0].delays_us == loaded.blocks[0].delays_us  # restored
     assert not link.replaced.exists()  # nothing unsaved to back up
+
+
+def _hold_for_scheduler(link, tmp_path, monkeypatch):
+    """The scan as "Queue in scheduler" leaves it: a file in the scheduler queue folder."""
+    monkeypatch.setattr(scheduler_client, "SCHEDULER_QUEUE_DIR", tmp_path / "queue")
+    loaded = load_sequence_file(link.scan_path)
+    return scheduler_client.save_queued_scan("link_test", "scan_delay", loaded.document, loaded.scan)
+
+
+def test_held_queue_file_is_saved_with_the_data_and_removed_when_done(link, tmp_path, monkeypatch):
+    held = _hold_for_scheduler(link, tmp_path, monkeypatch)
+    call(action="start_scan", sequence_path=str(held), task_id="t1")
+    wait_for_state("t1", "running")
+    snapshot = next(link.data.rglob("link_test/sequence.json"))  # the usual copy with the data
+    # The GUI (and the next start) now refer to that copy, not to the held file.
+    assert link.state.sequence_name == str(snapshot)
+    assert link.saved_paths[-1] == str(snapshot)
+    assert held.is_file()  # still held while the scan runs
+
+    link.pycam.shots = TOTAL_SHOTS
+    wait_for_state("t1", "completed")
+    assert not held.exists()
+    assert snapshot.is_file()
+
+
+def test_held_queue_file_is_kept_after_a_failure(link, tmp_path, monkeypatch):
+    held = _hold_for_scheduler(link, tmp_path, monkeypatch)
+    call(action="start_scan", sequence_path=str(held), task_id="t1")
+    wait_for_state("t1", "running")
+
+    def failing_apply(point):
+        raise RuntimeError("Remote static apply failed: VOA")
+
+    monkeypatch.setattr(link.state, "apply_scan_point", failing_apply)
+    link.pycam.shots = REPETITIONS
+    wait_for_state("t1", "failed")
+    assert held.is_file()  # the scheduler queues a failed scan again
 
 
 def test_repeated_start_request_does_not_start_twice(link):

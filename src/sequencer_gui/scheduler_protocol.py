@@ -17,7 +17,8 @@ Requests served by the sequencer (``remote_control/scheduler_link.py``):
 Scan replies carry ``task_state`` (one of the ``TASK_*`` values), ``progress_completed`` and
 ``progress_total`` (shots) and ``error``.
 
-Request served by the scheduler:
+Request served by the scheduler (sent by the Scan panel's Queue in scheduler button,
+``remote_control/scheduler_client.py``); the reply carries ``queue_position`` and ``task_id``:
 
     {"action": "queue_scan", "sequence_path": "..."}
 """
