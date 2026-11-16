@@ -9,7 +9,13 @@ from pathlib import Path
 
 from sequencer_gui.domain.document import SequenceDocument
 from sequencer_gui.domain.scan import ScanPlan
-from sequencer_gui.sequence_io import save_sequence
+from sequencer_gui.sequence_io import (
+    SequenceFileError,
+    document_from_payload,
+    document_to_payload,
+    load_sequence_file,
+    save_sequence,
+)
 
 # Root used by PyCam.PyCam.DATA_DIRECTORY; override via env for non-default installs.
 PYCAM_DATA_DIRECTORY = os.environ.get("PYCAM_DATA_DIRECTORY", r"D:\Experimental_Data")
@@ -47,6 +53,23 @@ def experiment_names_used_today(data_root: str | Path | None = None) -> set[str]
     return {p.name for p in day_dir.iterdir() if p.is_dir()}
 
 
+def unused_experiment_name(label: str, data_root: str | Path | None = None) -> str:
+    """``label`` if no folder of that name exists today, else ``label_2``, ``label_3``, … (first free).
+
+    Lets repeated runs of one saved scan each get their own PyCam data folder.
+    """
+    name = label.strip()
+    if not name:
+        raise ValueError("Experiment name is empty; cannot choose a new data label.")
+    used = experiment_names_used_today(data_root)
+    if name not in used:
+        return name
+    n = 2
+    while f"{name}_{n}" in used:
+        n += 1
+    return f"{name}_{n}"
+
+
 def experiment_data_directory(
     experiment_name: str, data_root: str | Path | None = None
 ) -> Path:
@@ -71,6 +94,28 @@ def _unused_sequence_path(folder: Path) -> Path:
     return candidate
 
 
+def _matching_snapshot(
+    folder: Path, document: SequenceDocument, scan: ScanPlan | None
+) -> Path | None:
+    """An existing snapshot in ``folder`` holding the same sequence and scan, or ``None``.
+
+    The ``name`` field is not compared: it only records which file the sequence was loaded from.
+    Both sides are compared as they read back from disk (loading fills in default rows/cells).
+    """
+    wanted_document = document_to_payload(document_from_payload(document_to_payload(document)))
+    wanted_scan = scan if scan is not None and not scan.is_empty() else None
+    for path in sorted(folder.glob(f"{SCAN_SEQUENCE_FILE_STEM}*.json")):
+        try:
+            saved = load_sequence_file(path)
+        except (OSError, ValueError, SequenceFileError):
+            continue  # unreadable or foreign file: never reuse it
+        if saved.scan_error is not None:
+            continue
+        if document_to_payload(saved.document) == wanted_document and saved.scan == wanted_scan:
+            return path
+    return None
+
+
 def save_scan_sequence_snapshot(
     experiment_name: str,
     sequence_name: str,
@@ -82,9 +127,14 @@ def save_scan_sequence_snapshot(
     """Write the sequence JSON into the PyCam data folder of ``experiment_name``; return its path.
 
     ``scan`` (the plan being started) is stored in the same file, as the Save button does.
+    When the experiment name is reused and the folder already holds a snapshot with the same
+    sequence and scan, that file is returned and no copy is written.
     """
     folder = experiment_data_directory(experiment_name, data_root)
     folder.mkdir(parents=True, exist_ok=True)
+    existing = _matching_snapshot(folder, document, scan)
+    if existing is not None:
+        return existing
     path = _unused_sequence_path(folder)
     save_sequence(path, sequence_name, document, scan)
     return path

@@ -34,8 +34,10 @@ from sequencer_gui.remote_control.scheduler_link import (
     SchedulerRequestServer,
     TaskHistory,
     load_sequence_for_scheduler,
+    request_new_data_label,
     request_sequence_path,
     request_task_id,
+    scan_data_label,
 )
 from sequencer_gui.scheduler_protocol import (
     SEQUENCER_SIMULATION_SERVER_NAME,
@@ -174,10 +176,13 @@ class SequencerSimulatorWindow(QMainWindow):
         if known is not None:
             return known.status()
         path = request_sequence_path(request)
+        new_data_label = request_new_data_label(request)
         if self._task is not None:
             raise LinkError("A scan is already running in the sequencer simulator.")
         loaded = load_sequence_for_scheduler(path, require_scan=True)
         scan = loaded.scan
+        # Reads today's PyCam folder names only; the simulator writes no data.
+        data_label = scan_data_label(scan.label, new_data_label=new_data_label)
         try:
             total = expected_shot_count(scan.parameters, scan.repetitions)
         except ValueError as error:
@@ -188,14 +193,15 @@ class SequencerSimulatorWindow(QMainWindow):
                 f"The scan saved in {path.name} does not fit its sequence "
                 "(unknown device, parameter or timestep)."
             )
-        task = ScanTask(task_id=task_id, path=path, state=TASK_RUNNING, total=total)
+        task = ScanTask(task_id=task_id, path=path, state=TASK_RUNNING, total=total,
+                        file_label=scan.label, data_label=data_label)
         self._tasks.add(task)
         self._task = task
         self._scan_duration_s = duration_s
         self._scan_elapsed_s = 0.0
         self._free_run_task_id = None
         self._sequence_label.setText(str(path))
-        self._state_label.setText(f"Scan running · data label {scan.label}")
+        self._state_label.setText(f"Scan running · data label {data_label}")
         self._sync_buttons()
         return task.status()
 

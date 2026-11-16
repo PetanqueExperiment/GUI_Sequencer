@@ -8,7 +8,11 @@ import pytest
 
 from sample_documents import sample_document
 from sequencer_gui.domain.scan import ScanParameter, ScanPlan
-from sequencer_gui.pycam_repository import save_scan_sequence_snapshot
+from sequencer_gui.pycam_repository import (
+    save_scan_sequence_snapshot,
+    today_data_directory,
+    unused_experiment_name,
+)
 from sequencer_gui.sequence_io import (
     SequenceFileError,
     document_to_payload,
@@ -146,6 +150,42 @@ def test_scan_snapshot_holds_the_scan(tmp_path):
         "ramsey_detuning", "seq", sample_document(), data_root=tmp_path, scan=SCAN
     )
     assert load_sequence_file(path).scan == SCAN
+
+
+def test_repeated_identical_snapshot_writes_no_copy(tmp_path):
+    first = save_scan_sequence_snapshot(
+        "ramsey_detuning", "seq", sample_document(), data_root=tmp_path, scan=SCAN
+    )
+    again = save_scan_sequence_snapshot(
+        "ramsey_detuning", "other_name", sample_document(), data_root=tmp_path, scan=SCAN
+    )
+    assert again == first
+    assert [p.name for p in first.parent.glob("*.json")] == ["sequence.json"]
+
+
+def test_changed_scan_snapshot_is_kept_beside_the_first(tmp_path):
+    first = save_scan_sequence_snapshot(
+        "ramsey_detuning", "seq", sample_document(), data_root=tmp_path, scan=SCAN
+    )
+    changed = ScanPlan(SCAN.label, SCAN.repetitions + 1, SCAN.parameters)
+    second = save_scan_sequence_snapshot(
+        "ramsey_detuning", "seq", sample_document(), data_root=tmp_path, scan=changed
+    )
+    assert second != first and second.name.startswith("sequence_")
+    assert load_sequence_file(first).scan == SCAN
+    assert load_sequence_file(second).scan == changed
+
+
+def test_unused_experiment_name_counts_up(tmp_path):
+    day = today_data_directory(tmp_path)
+    assert unused_experiment_name("ramsey", tmp_path) == "ramsey"
+    (day / "ramsey").mkdir(parents=True)
+    assert unused_experiment_name("ramsey", tmp_path) == "ramsey_2"
+    (day / "ramsey_2").mkdir()
+    (day / "ramsey_4").mkdir()
+    assert unused_experiment_name(" ramsey ", tmp_path) == "ramsey_3"
+    with pytest.raises(ValueError):
+        unused_experiment_name("  ", tmp_path)
 
 
 def test_state_scan_plan_round_trip(app):

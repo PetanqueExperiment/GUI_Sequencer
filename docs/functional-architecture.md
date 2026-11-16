@@ -261,7 +261,7 @@ sequenceDiagram
 
 Scan label availability (red/blue/green) comes from `pycam_repository.classify_scan_label` (today’s data folders).
 
-On scan start, `pycam_repository.save_scan_sequence_snapshot` writes the sequence JSON (same v8 format as the Save button) into the PyCam data folder of the scan: `{PYCAM_DATA_DIRECTORY}/{Y}/{m}/{d}/{scan label}/sequence.json`. Written after PyCam accepted the experiment name and before the first scan point is applied, so the snapshot holds the configured matrix. A reused label keeps the earlier file and writes `sequence_{HHMMSS}.json`. Failure only warns; the scan continues.
+On scan start, `pycam_repository.save_scan_sequence_snapshot` writes the sequence JSON (same v8 format as the Save button) into the PyCam data folder of the scan: `{PYCAM_DATA_DIRECTORY}/{Y}/{m}/{d}/{scan label}/sequence.json`. Written after PyCam accepted the experiment name and before the first scan point is applied, so the snapshot holds the configured matrix. A reused label keeps the earlier file: if one of the folder's `sequence*.json` already holds the same sequence and scan (compared as read back from disk, ignoring the `name` field), it is reused and nothing is written; otherwise `sequence_{HHMMSS}.json` is written. Failure only warns; the scan continues.
 
 **Scan saved with the sequence.** The Save button and the scan snapshot store the Scan panel in the sequence file, as an optional top-level `scan` key next to `document` (still v8): `{"label", "repetitions", "axes": [{"device", "param", "timestep", "values"}]}`, every axis field being the text shown in the panel. An empty panel (no label, no axis) writes no key. The key exists only on disk: `live_sequence_file_dict` (host sync, AI revision hash) never contains it.
 
@@ -432,6 +432,7 @@ sequenceDiagram
 - **Unattended scans:** with `attended=False`, the scan panel opens no message box until the scan ends; problems go to `scan_ended` (and stderr) and the scheduler pauses its queue.
 - **Never takes over:** refused while the operator's scan runs or a modal dialog is open (the scheduler retries). An operator Interrupt of a scheduled scan reports `stopped`. Free-run is paused only if it is still the sequence the scheduler started.
 - **Unsaved work:** if the open sequence differs from its file, it is saved to `~/.sequencer_gui/replaced_by_scheduler/` before the scheduled file replaces it. A loaded file becomes the last sequence (`persistence`), as with Load.
+- **New data label per run:** `start_scan` with `"new_data_label": true` runs the scan under `pycam_repository.unused_experiment_name(label)`: the saved label if no folder of that name exists today, else `label_2`, `label_3`, … The run's label is reported as `data_label` in every task reply, and the snapshot saved with the data carries it. The file is not changed; when the scan ends the GUI shows the file's label again (unless it now shows the data copy of a held queue file, or the operator changed the label), so the next start sees no unsaved change.
 - **Task state:** kept for the last 50 task ids, so a repeated `start_scan` does not start twice and a finished task can still be queried.
 - Tests: `tests/test_scheduler_link.py` (real scan panel and toolbar, fake PyCam, real local socket).
 

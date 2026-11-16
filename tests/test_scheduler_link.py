@@ -234,6 +234,46 @@ def test_scan_runs_to_completion(link):
     assert not link.replaced.exists()  # nothing unsaved to back up
 
 
+def test_new_data_label_gives_each_run_its_own_folder(link):
+    def run(task_id: str) -> dict:
+        reply = call(action="start_scan", sequence_path=str(link.scan_path), task_id=task_id,
+                     new_data_label=True)
+        wait_for_state(task_id, "running")
+        assert link.pycam.name == reply["data_label"]  # PyCam saves under the run's label
+        link.pycam.shots = TOTAL_SHOTS
+        status = wait_for_state(task_id, "completed")
+        link.pycam.shots = 0
+        return status
+
+    assert run("t1")["data_label"] == "link_test"  # first run today: the saved label
+    assert run("t2")["data_label"] == "link_test_2"
+    snapshot = next(link.data.rglob("link_test_2/sequence.json"))
+    assert load_sequence_file(snapshot).scan.label == "link_test_2"  # the copy matches the data
+    # The GUI shows the file's label again: unchanged, so nothing is backed up next time.
+    assert link.state.scan_label == "link_test"
+    assert load_sequence_file(link.scan_path).scan.label == "link_test"  # file untouched
+    assert run("t3")["data_label"] == "link_test_3"
+    assert not link.replaced.exists()
+
+
+def test_without_new_data_label_runs_share_one_folder_and_one_snapshot(link):
+    for task_id in ("t1", "t2"):
+        reply = start(link, task_id)
+        wait_for_state(task_id, "running")
+        assert reply["data_label"] == "link_test"
+        link.pycam.shots = TOTAL_SHOTS
+        wait_for_state(task_id, "completed")
+        link.pycam.shots = 0
+    (folder,) = link.data.rglob("link_test")
+    assert [p.name for p in folder.glob("*.json")] == ["sequence.json"]  # no duplicate copy
+
+
+def test_bad_new_data_label_value_is_refused(link):
+    with pytest.raises(LinkError, match="new_data_label"):
+        call(action="start_scan", sequence_path=str(link.scan_path), task_id="t1",
+             new_data_label="yes")
+
+
 def _hold_for_scheduler(link, tmp_path, monkeypatch):
     """The scan as "Queue in scheduler" leaves it: a file in the scheduler queue folder."""
     monkeypatch.setattr(scheduler_client, "SCHEDULER_QUEUE_DIR", tmp_path / "queue")

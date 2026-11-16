@@ -3,7 +3,8 @@
 The scheduler (separate program) sends one JSON request per connection
 (see :mod:`sequencer_gui.scheduler_protocol`). The link
 
-- loads a saved sequence with its saved scan and starts the scan,
+- loads a saved sequence with its saved scan and starts the scan, optionally under a new data
+  label (``label_2``, ``label_3``, … : the first PyCam folder name not used today),
 - reports its progress (shots saved by PyCam) and how it ended, and interrupts it on request,
 - loads and runs an optional free-run sequence between scans, and pauses it again.
 
@@ -31,6 +32,7 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication
 
 from sequencer_gui.persistence import save_last_sequence_path
+from sequencer_gui.pycam_repository import unused_experiment_name
 from sequencer_gui.remote_control.scheduler_client import is_queued_scan_file
 from sequencer_gui.scan_plan import expected_shot_count
 from sequencer_gui.scheduler_protocol import (
@@ -188,6 +190,24 @@ def request_sequence_path(request: dict) -> Path:
     return Path(path_text).expanduser().resolve()
 
 
+def request_new_data_label(request: dict) -> bool:
+    """True if the scheduler asks for a data label of its own for this run (optional field)."""
+    value = request.get("new_data_label", False)
+    if not isinstance(value, bool):
+        raise LinkError("'new_data_label' must be true or false.")
+    return value
+
+
+def scan_data_label(file_label: str, *, new_data_label: bool) -> str:
+    """PyCam experiment name for a scheduled run of a scan saved with ``file_label``."""
+    if not new_data_label:
+        return file_label
+    try:
+        return unused_experiment_name(file_label)
+    except OSError as error:
+        raise LinkError(f"Could not choose a new data label for {file_label!r}: {error}") from error
+
+
 def load_sequence_for_scheduler(path: Path, *, require_scan: bool) -> LoadedSequence:
     """Read and check a saved sequence; with ``require_scan`` it must hold a startable scan."""
     try:
@@ -226,6 +246,9 @@ class ScanTask:
     completed: int = 0
     total: int = 0
     error: str = ""
+    # Label saved in the file, and the PyCam experiment name this run uses (differs on request).
+    file_label: str = ""
+    data_label: str = ""
 
     @property
     def active(self) -> bool:
@@ -237,6 +260,7 @@ class ScanTask:
             "progress_completed": self.completed,
             "progress_total": self.total,
             "error": self.error,
+            "data_label": self.data_label,
         }
 
 
@@ -259,7 +283,7 @@ class TaskHistory:
         task = self._tasks.get(task_id)
         if task is None:
             return {"task_state": TASK_UNKNOWN, "progress_completed": 0, "progress_total": 0,
-                    "error": ""}
+                    "error": "", "data_label": ""}
         return task.status()
 
 
@@ -328,6 +352,7 @@ class SchedulerLink(QObject):
         else:
             task.state = TASK_STOPPED  # interrupted, by the scheduler or the operator
         self._task = None
+        self._restore_file_label(task)
         if task.state != TASK_FAILED:
             self._remove_held_queue_file(task.path)  # a failed scan is queued again: keep it
 
@@ -339,6 +364,20 @@ class SchedulerLink(QObject):
             path.unlink(missing_ok=True)
         except OSError as error:
             print(f"Scheduler link: could not remove {path}: {error}", file=sys.stderr)
+
+    def _restore_file_label(self, task: ScanTask) -> None:
+        """After a run under a new data label, show the label saved in the file again.
+
+        Otherwise the GUI would differ from its file, and the next scheduled start would back the
+        sequence up as unsaved. Not done when the GUI now shows the copy saved with the data
+        (that copy carries the run's label) or the operator changed the label since.
+        """
+        state = self._state
+        if task.data_label == task.file_label:
+            return
+        if state.sequence_name != str(task.path) or state.scan_label != task.data_label:
+            return
+        state.set_scan_label(task.file_label)
 
     def _show_data_copy(self, task: ScanTask) -> None:
         """For a held queue file, point the GUI (and the next start) at the copy saved with the data."""
@@ -412,6 +451,7 @@ class SchedulerLink(QObject):
         if known is not None:
             return known.status()  # repeated request (the first reply was lost or late)
         path = request_sequence_path(request)
+        new_data_label = request_new_data_label(request)
         busy = self._busy_reason()
         if busy:
             raise LinkError(busy)
@@ -420,7 +460,10 @@ class SchedulerLink(QObject):
             total = expected_shot_count(loaded.scan.parameters, loaded.scan.repetitions)
         except ValueError as error:
             raise LinkError(f"The scan saved in {path.name} is invalid: {error}") from error
-        task = ScanTask(task_id=task_id, path=path, total=total)
+        file_label = loaded.scan.label.strip()
+        data_label = scan_data_label(file_label, new_data_label=new_data_label)
+        task = ScanTask(task_id=task_id, path=path, total=total, file_label=file_label,
+                        data_label=data_label)
         self._tasks.add(task)
         self._task = task
         # Reply first: starting waits for PyCam, which may take longer than the scheduler waits.
@@ -434,6 +477,8 @@ class SchedulerLink(QObject):
             if self._state.scan_running:
                 raise LinkError("A scan was started in the sequencer before the scheduled one.")
             self._load_into_gui(task.path, loaded)
+            if task.data_label != task.file_label:
+                self._state.set_scan_label(task.data_label)
             error = self._panel.start_scan(attended=False)
         except Exception as e:
             error = str(e) if isinstance(e, LinkError) else f"{type(e).__name__}: {e}"
@@ -449,6 +494,7 @@ class SchedulerLink(QObject):
         task.error = error
         if self._task is task:
             self._task = None
+        self._restore_file_label(task)
 
     def _get_task_status(self, request: dict) -> dict:
         return self._tasks.status(request_task_id(request))

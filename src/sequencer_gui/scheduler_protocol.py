@@ -8,14 +8,17 @@ line, ``{"ok": true, ...}`` or ``{"ok": false, "error": "..."}``, and the connec
 
 Requests served by the sequencer (``remote_control/scheduler_link.py``):
 
-    {"action": "start_scan", "sequence_path": "...", "task_id": "..."}
+    {"action": "start_scan", "sequence_path": "...", "task_id": "...", "new_data_label": false}
     {"action": "get_task_status", "task_id": "..."}
     {"action": "stop_scan", "task_id": "..."}
     {"action": "start_free_run", "sequence_path": "...", "task_id": "..."}
     {"action": "stop_free_run", "task_id": "..."}
 
+``new_data_label`` (optional, default false): run the scan under the first PyCam experiment name
+not used today (``label``, ``label_2``, ``label_3``, …) instead of the label saved in the file.
+
 Scan replies carry ``task_state`` (one of the ``TASK_*`` values), ``progress_completed`` and
-``progress_total`` (shots) and ``error``.
+``progress_total`` (shots), ``error`` and ``data_label`` (the PyCam experiment name of the run).
 
 Request served by the scheduler (sent by the Scan panel's Queue in scheduler button,
 ``remote_control/scheduler_client.py``); the reply carries ``queue_position`` and ``task_id``:
